@@ -34,13 +34,12 @@ class MTDA_AMQP(object):
     def on_request(self,ch, method, props, body):
         print(body,type(body))
         if str(body.decode('UTF-8'))=="target_on":
-            response=target_on()
+            response=self.target_on()
         elif str(body.decode('UTF-8'))=="target_off":
-            response=target_off()
+            response=self.target_off()
         else:
-            response=fib(int(body))
+            response=self.fib(int(body))
         ch.basic_publish(exchange='',routing_key=props.reply_to,properties=pika.BasicProperties(correlation_id =props.correlation_id),body=str(response))
-        ch.basic_ack(delivery_tag=method.delivery_tag)
         ch.basic_ack(delivery_tag=method.delivery_tag)
 
     def run_server(self):
