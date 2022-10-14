@@ -12,8 +12,6 @@ class MTDA_AMQP(object):
         self.channel.basic_consume(queue='mtda-amqp', on_message_callback=on_request)
         self.channel.start_consuming()
 
-
-
     def fib(n):
         if n == 0:
             return 0
