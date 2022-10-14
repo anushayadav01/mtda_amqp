@@ -32,8 +32,8 @@ class MTDA_AMQP(object):
 
 
     def on_request(self,ch, method, props, body):
-        print(body,type(body))
         if str(body.decode('UTF-8'))=="target_on":
+            print(body,type(body))
             response=self.target_on()
         elif str(body.decode('UTF-8'))=="target_off":
             response=self.target_off()
