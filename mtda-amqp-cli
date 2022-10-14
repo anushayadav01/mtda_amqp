@@ -45,6 +45,9 @@ class MTDA_Application:
                 print("unknown target command '%s'!" % (cmd), file=sys.stderr)
                 return 1
 
+    def console_cmd(self):
+        pass
+
 
     def main(self):
         config = None
