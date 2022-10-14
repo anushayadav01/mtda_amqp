@@ -9,7 +9,7 @@ class Client:
     def __init__(self,remote):
 
         self.remote=remote
-        self.connection = pika.BlockingConnection(pika.URLParameters('amqp://admin:password@%s:5672/%2F',str(self.remote)))
+        self.connection = pika.BlockingConnection(pika.URLParameters('amqp://admin:password@%s:5672/%2F'%(str(self.remote))))
         self.channel = self.connection.channel()
         result = self.channel.queue_declare(queue='', exclusive=True)
         self.callback_queue = result.method.queue
