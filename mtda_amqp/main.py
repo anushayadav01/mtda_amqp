@@ -6,10 +6,10 @@ class MTDA_AMQP(object):
 
     def __init__(self):
         self.connection = pika.BlockingConnection(pika.URLParameters('amqp://admin:password@134.86.62.211:5672/%2F'))
-        self.channel = connection.channel()
+        self.channel = self.connection.channel()
         self.channel.queue_declare(queue='mtda-amqp')
         self.channel.basic_qos(prefetch_count=1)
-        self.channel.basic_consume(queue='mtda-amqp', on_message_callback=on_request)
+        self.channel.basic_consume(queue='mtda-amqp', on_message_callback=self.on_request)
 
     def fib(n):
         if n == 0:
