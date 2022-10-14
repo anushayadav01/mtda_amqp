@@ -1,43 +1,88 @@
 #!/usr/bin/env python3
 
 import pika
+from mtda_amqp.main import MTDA_AMQP
+from mtda_amqp.client import Client
 
 class MTDA_Application:
-
     def __init__(self):
-        self.connection = pika.BlockingConnection(pika.URLParameters('amqp://admin:password@134.86.62.211:5672/%2F'))
-        self.channel = self.connection.channel()
-        result = self.channel.queue_declare(queue='', exclusive=True)
-        self.callback_queue = result.method.queue
-        self.channel.basic_consume(
-            queue=self.callback_queue,
-            on_message_callback=self.on_response,
-            auto_ack=True)
-        self.response = None
-        self.corr_id = None
+        self.agent = None
+        self.remote = "localhost"
+        self.logfile = "/var/log/mtda.log"
+        self.pidfile = "/var/run/mtda.pid"
+        self.exiting = False
+        self.channel = "console"
+    
+    def target_off(self, args=None):
+        status = self.agent.call("target_off")
+
+    def target_on(self, args=None):
+        status = self.agent.call("target_on")
+
+    def target_cmd(self, args):
+        if len(args) > 0:
+            cmd = args[0]
+            args.pop(0)
+
+            cmds = {
+               'off': self.target_off,
+               'on': self.target_on,
+            }
+
+            if cmd in cmds:
+                return cmds[cmd](args)
+            else:
+                print("unknown target command '%s'!" % (cmd), file=sys.stderr)
+                return 1
+
+
+    def main(self):
+        config = None
+        daemonize = False
+        detach = True
+
+        options, stuff = getopt.getopt(
+            sys.argv[1:], 'c:dhnr:v',
+            ['daemon', 'help', 'no-detach', 'remote=', 'version'])
+        for opt, arg in options:
+            if opt in ('-c', '--config'):
+                config = arg
+            if opt in ('-d', '--daemon'):
+                daemonize = True
+            if opt in ('-h', '--help'):
+                self.help_cmd()
+                sys.exit(0)
+            if opt in ('-n', '--no-detach'):
+                detach = False
+            if opt in ('-r', '--remote'):
+                self.remote = arg
+            if opt in ('-v', '--version'):
+                self.print_version()
+                sys.exit(0)
+       
+            if daemonize is True:
+                self.agent = MTDA_AMQP()
+                self.agent.run_server()
+
+        if len(stuff) == 0:
+            stuff = ['target', 'on']    
+        cmd = stuff[0]
+        stuff.pop(0)
         
+        cmds = {
+            'target': self.target_cmd,
+            'console': self.console_cmd,
+            }
+        if cmd in cmds:
+            if cmd != 'help':
+                self.agent = Client(self.remote)
+                status = cmds[cmd](stuff)
+        else:
+            print("unknown command '%s'!" % (cmd), file=sys.stderr)
+            sys.exit(1)
 
-      def on_response(self, ch, method, props, body):
-          if self.corr_id == props.correlation_id:
-              self.response = body
+if __name__ == '__main__':
 
-      def call(self, n):
-          self.response = None
-          self.corr_id = str(uuid.uuid4())
-          self.channel.basic_publish(
-              exchange='',
-              routing_key='mtda-amqp',
-              properties=pika.BasicProperties(
-                  reply_to=self.callback_queue,
-                  correlation_id=self.corr_id,
-            ),
-            body=str(n))
-          self.connection.process_data_events(time_limit=None)
-          return self.response
-
-
-mtda_rpc=MTDA_Application()
-print(" [x] requesting target_on for mtda")
-response=mtda_rpc.call("target_on")
-print(" [.] Got %r" % response)
+    mtda_rpc=MTDA_Application()
+    mtda_rpc.main()
 

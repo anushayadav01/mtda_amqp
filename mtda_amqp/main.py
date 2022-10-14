@@ -10,7 +10,6 @@ class MTDA_AMQP(object):
         self.channel.queue_declare(queue='mtda-amqp')
         self.channel.basic_qos(prefetch_count=1)
         self.channel.basic_consume(queue='mtda-amqp', on_message_callback=on_request)
-        self.channel.start_consuming()
 
     def fib(n):
         if n == 0:
@@ -24,16 +23,25 @@ class MTDA_AMQP(object):
         result=True
         print("The target is power on")
         return result
+    
+    def target_off(self,args=None):
+        result=False
+        print("The target is power off")
+        return result
+
 
 
     def on_request(self,ch, method, props, body):
         print(body,type(body))
         if str(body.decode('UTF-8'))=="target_on":
             response=target_on()
+        elif str(body.decode('UTF-8'))=="target_off":
+            response=target_off()
         else:
             response=fib(int(body))
         ch.basic_publish(exchange='',routing_key=props.reply_to,properties=pika.BasicProperties(correlation_id =props.correlation_id),body=str(response))
         ch.basic_ack(delivery_tag=method.delivery_tag)
         ch.basic_ack(delivery_tag=method.delivery_tag)
 
-
+    def run_server(self):
+        self.channel.start_consuming()
