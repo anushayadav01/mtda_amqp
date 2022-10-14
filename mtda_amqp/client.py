@@ -2,7 +2,7 @@ import os
 import zerorpc
 import socket
 import pika 
-
+import uuid
 
 class Client:
 
