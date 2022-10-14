@@ -1,6 +1,7 @@
 import os
 import zerorpc
 import socket
+import pika 
 
 
 class Client:
