@@ -5,7 +5,7 @@ import pika
 class MTDA_AMQP(object):
 
     def __init__(self):
-        self.connection = pika.BlockingConnection(pika.URLParameters('amqp://admin:password@134.86.62.211:5672/%2F'))
+        self.connection = pika.BlockingConnection(pika.URLParameters('amqp://admin:password@134.86.62.211:5672'))
         self.channel = self.connection.channel()
         self.channel.queue_declare(queue='mtda-amqp')
         self.channel.basic_qos(prefetch_count=1)
