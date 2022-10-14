@@ -2,8 +2,6 @@ import os
 import zerorpc
 import socket
 
-from mtda_mqtt.main import MTDAMqtt
-import mtda_mqtt.constants as CONSTS
 
 class Client:
 
