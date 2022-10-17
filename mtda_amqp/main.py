@@ -22,14 +22,16 @@ class MTDA_AMQP(object):
 
     def target_on(self,args=None):
         result=True
-        print("The target is power on")
+        print("The target is poweed on")
         os.system("echo 1 > /sys/class/gpio/gpio201/value")
         os.system("echo 1 > /sys/class/gpio/gpio203/value")
         return result
     
     def target_off(self,args=None):
         result=False
-        print("The target is power off")
+        print("The target is powered off")
+        os.system("echo 0 >/sys/class/gpio/gpio201/value")
+        os.system("echo 0 >/sys/class/gpio/gpio203/value")
         return result
 
 
