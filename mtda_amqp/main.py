@@ -1,11 +1,12 @@
 #!/usr/bin/env python
 import pika
+import os
 
 
 class MTDA_AMQP(object):
 
     def __init__(self):
-        self.connection = pika.BlockingConnection(pika.URLParameters('amqp://admin:password@134.86.62.211:5672'))
+        self.connection = pika.BlockingConnection(pika.URLParameters('amqp://admin:password@134.86.62.153:5672'))
         self.channel = self.connection.channel()
         self.channel.queue_declare(queue='mtda-amqp')
         self.channel.basic_qos(prefetch_count=1)
@@ -22,6 +23,8 @@ class MTDA_AMQP(object):
     def target_on(self,args=None):
         result=True
         print("The target is power on")
+        os.system("echo 1 > /sys/class/gpio/gpio201/value")
+        os.system("echo 1 > /sys/class/gpio/gpio203/value")
         return result
     
     def target_off(self,args=None):
