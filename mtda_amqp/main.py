@@ -11,6 +11,10 @@ class MTDA_AMQP(object):
         self.channel.queue_declare(queue='mtda-amqp')
         self.channel.basic_qos(prefetch_count=1)
         self.channel.basic_consume(queue='mtda-amqp', on_message_callback=self.on_request)
+        self.monitor = None
+        self.monitor_logger = None
+        self.monitor_output = None
+        self.debug_level = 0
 
     def fib(n):
         if n == 0:
@@ -19,6 +23,54 @@ class MTDA_AMQP(object):
             return 1
         else:
             return fib(n - 1) + fib(n - 2)
+
+    def debug(self, level, msg):
+        if self.debug_level >= level:
+            if self.debug_level == 0:
+                prefix = "# "
+            else:
+                prefix = "# debug%d: " % level
+            msg = str(msg).replace("\n", "\n%s ... " % prefix)
+            lines = msg.splitlines()
+            sys.stderr.buffer.write(prefix.encode("utf-8"))
+            for line in lines:
+                sys.stderr.buffer.write(_make_printable(line).encode("utf-8"))
+                sys.stderr.buffer.write(b"\n")
+                sys.stderr.buffer.flush()
+
+    def console_prefix_key(self):
+        self.mtda.debug(3, "main.console_prefix_key()")
+        return self.prefix_key
+
+     def _prefix_key_code(self, prefix_key):
+        prefix_key = prefix_key.lower()
+        key_dict = {'ctrl-a': '\x01', 'ctrl-b': '\x02', 'ctrl-c': '\x03',
+                    'ctrl-d': '\x04', 'ctrl-e': '\x05', 'ctrl-f': '\x06',
+                    'ctrl-g': '\x07', 'ctrl-h': '\x08', 'ctrl-i': '\x09',
+                    'ctrl-j': '\x0A', 'ctrl-k': '\x0B', 'ctrl-l': '\x0C',
+                    'ctrl-n': '\x0E', 'ctrl-o': '\x0F', 'ctrl-p': '\x10',
+                    'ctrl-q': '\x11', 'ctrl-r': '\x12', 'ctrl-s': '\x13',
+                    'ctrl-t': '\x14', 'ctrl-u': '\x15', 'ctrl-v': '\x16',
+                    'ctrl-w': '\x17', 'ctrl-x': '\x18', 'ctrl-y': '\x19',
+                    'ctrl-z': '\x1A'}
+
+        if prefix_key in key_dict:
+            key_ascii = key_dict[prefix_key]
+            return key_ascii
+        else:
+            raise ValueError("the prefix key specified '{0}' is not "
+                             "supported".format(prefix_key))
+
+
+    def console_getkey(self):
+        self.mtda.debug(3, "main.console_getkey()")
+        result = None
+        try:
+            result = self.console_input.getkey()
+        except AttributeError:
+            print("Initialize the console using console_init first")
+        self.mtda.debug(3, "main.console_getkey(): %s" % str(result))
+        return result
 
     def target_on(self,args=None):
         result=True
@@ -35,6 +87,25 @@ class MTDA_AMQP(object):
         return result
 
 
+    def monitor_remote(self, host, screen):
+        self.mtda.debug(3, "main.monitor_remote()")
+
+        result = None
+        if self.is_remote is True:
+            # Stop previous remote console
+            if self.monitor_output is not None:
+                self.monitor_output.stop()
+            if host is not None:
+                # Create and start our remote console in paused
+                # (i.e. buffering) state
+                self.monitor_output = RemoteMonitor(host, self.conport, screen)
+                self.monitor_output.pause()
+                self.monitor_output.start()
+            else:
+                self.monitor_output = None
+
+        self.mtda.debug(3, "main.monitor_remote(): %s" % str(result))
+        return result
 
     def on_request(self,ch, method, props, body):
         if str(body.decode('UTF-8'))=="target_on":
