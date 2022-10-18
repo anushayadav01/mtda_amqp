@@ -96,7 +96,8 @@ class MTDA_Application:
             else:
                 print("unknown target command '%s'!" % (cmd), file=sys.stderr)
                 return 1
-
+    
+    #Client part
     def client(self):
         return self.agent
 
