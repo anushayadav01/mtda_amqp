@@ -4,9 +4,12 @@ import socket
 import pika 
 import uuid
 
+from mtda_amqp.main import MTDA_AMQP
+
 class Client:
 
     def __init__(self,remote):
+        agent=MTDA_AMQP()
 
         self.remote=remote
         self.connection = pika.BlockingConnection(pika.URLParameters('amqp://admin:password@%s:5672'%(str(self.remote))))
