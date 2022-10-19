@@ -10,10 +10,10 @@ import signal
 import time
 import sys
 
-
+#from mtda_amqp.constants import DEFAULTS
+from mtda_amqp.console.screen import ScreenOutput
 from mtda_amqp.main import MTDA_AMQP
 from mtda_amqp.client import Client
-from mtda_amqp.console.screen import ScreenOutput
 
 
 class MTDA_Application:

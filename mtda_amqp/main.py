@@ -5,6 +5,8 @@ import os
 from mtda.console.remote import RemoteConsole, RemoteMonitor
 from mtda.console.input import ConsoleInput
 
+DEFAULT_PREFIX_KEY = 'ctrl-a'
+DEFAULT_PASTEBIN_EP = "http://pastebin.com/api/api_post.php"
 
 class MTDA_AMQP(object):
 
