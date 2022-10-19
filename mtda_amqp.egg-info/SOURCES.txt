@@ -1,0 +1,12 @@
+README.md
+mtda-amqp-cli
+setup.py
+mtda_amqp/__init__.py
+mtda_amqp/client.py
+mtda_amqp/constants.py
+mtda_amqp/main.py
+mtda_amqp.egg-info/PKG-INFO
+mtda_amqp.egg-info/SOURCES.txt
+mtda_amqp.egg-info/dependency_links.txt
+mtda_amqp.egg-info/requires.txt
+mtda_amqp.egg-info/top_level.txt
