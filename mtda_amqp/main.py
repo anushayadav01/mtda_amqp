@@ -137,6 +137,17 @@ class MTDA_AMQP(object):
         os.system("echo 0 >/sys/class/gpio/gpio201/value")
         os.system("echo 0 >/sys/class/gpio/gpio203/value")
         return result
+	
+    def target_locked(self, session):
+        self.mtda.debug(3, "main.target_locked()")
+
+        self._session_check(session)
+        return self._check_locked(session)
+
+    def target_owner(self):
+        self.mtda.debug(3, "main.target_owner()")
+
+        return self._lock_owner
 
     def _target_status(self, session=None):
         self.mtda.debug(3, "main._target_status()")

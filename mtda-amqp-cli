@@ -101,7 +101,7 @@ class MTDA_Application:
     def client(self):
         return self.agent
 
-    def console_cmd(self):
+    def console_cmd(self,args):
         if len(args) > 0:
             cmd = args[0]
             args.pop(0)

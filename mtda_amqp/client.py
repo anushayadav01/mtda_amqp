@@ -3,26 +3,30 @@ import zerorpc
 import socket
 import pika 
 import uuid
+import random
 
 from mtda_amqp.main import MTDA_AMQP
 import mtda_amqp.constants as CONSTS
 
 class Client:
 
-    def __init__(self,remote):
+    def __init__(self,remote,session=None):
+   
         agent=MTDA_AMQP()
-        '''
-        agent.load_config(host, config_files=config_files)
-        if agent.remote is not None:
-            uri = "tcp://%s:%d" % (agent.remote, agent.ctrlport)
-            self._impl = zerorpc.Client(heartbeat=CONSTS.RPC.HEARTBEAT,
-                                        timeout=CONSTS.RPC.TIMEOUT)
-            self._impl.connect(uri)
-        else:
-            self._impl = agent
-        '''
         self._agent = agent
-
+        self.remote=remote
+        self.connection = pika.BlockingConnection(pika.URLParameters('amqp://admin:password@%s:5672'%(str(self.remote))))
+        self.channel = self.connection.channel()
+        result = self.channel.queue_declare(queue='', exclusive=True)
+        self.callback_queue = result.method.queue
+        self.channel.basic_consume(
+            queue=self.callback_queue,
+            on_message_callback=self.on_response,
+            auto_ack=True)
+        self.response = None
+        self.corr_id = None
+        self._agent = agent
+        self._impl= self.call
         if session is None:
             HOST = socket.gethostname()
             USER = os.getenv("USER")
@@ -39,18 +43,6 @@ class Client:
             self._session = os.getenv('MTDA_SESSION', name)
         else:
             self._session = session
-        self._agent = agent
-        self.remote=remote
-        self.connection = pika.BlockingConnection(pika.URLParameters('amqp://admin:password@%s:5672'%(str(self.remote))))
-        self.channel = self.connection.channel()
-        result = self.channel.queue_declare(queue='', exclusive=True)
-        self.callback_queue = result.method.queue
-        self.channel.basic_consume(
-            queue=self.callback_queue,
-            on_message_callback=self.on_response,
-            auto_ack=True)
-        self.response = None
-        self.corr_id = None
 
     def console_dump(self):
         return self._impl.console_dump(self._session)
@@ -111,7 +103,7 @@ class Client:
         return self._impl.storage_status(self._session)
 
     def target_locked(self):
-        return self._impl.target_locked(self._session)
+        return self._impl("target_locked(%s)"%(self._session))
 
 
     def remote(self):
