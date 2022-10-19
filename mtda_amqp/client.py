@@ -5,6 +5,7 @@ import pika
 import uuid
 
 from mtda_amqp.main import MTDA_AMQP
+import mtda_amqp.constants as CONSTS
 
 class Client:
 
@@ -19,6 +20,7 @@ class Client:
             self._impl.connect(uri)
         else:
             self._impl = agent
+        '''
         self._agent = agent
 
         if session is None:
@@ -37,7 +39,6 @@ class Client:
             self._session = os.getenv('MTDA_SESSION', name)
         else:
             self._session = session
-        '''
         self._agent = agent
         self.remote=remote
         self.connection = pika.BlockingConnection(pika.URLParameters('amqp://admin:password@%s:5672'%(str(self.remote))))
@@ -117,7 +118,7 @@ class Client:
         return self._agent.remote
 
     def session(self):
-        return self.
+        return self._session
         
     def on_response(self, ch, method, props, body):
         if self.corr_id == props.correlation_id:

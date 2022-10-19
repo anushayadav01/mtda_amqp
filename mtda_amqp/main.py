@@ -18,6 +18,12 @@ class MTDA_AMQP(object):
         self.monitor_logger = None
         self.monitor_output = None
         self.debug_level = 0
+        self.is_remote = False
+        self.console_output = None
+        self.conport = 5557
+        self.ctrlport = 5556
+        self.prefix_key = self._prefix_key_code(DEFAULT_PREFIX_KEY)
+
 
     def fib(n):
         if n == 0:
@@ -97,6 +103,24 @@ class MTDA_AMQP(object):
             print("Initialize the console using console_init first")
         self.mtda.debug(3, "main.console_getkey(): %s" % str(result))
         return result
+
+
+    def console_remote(self, host, screen):
+        self.mtda.debug(3, "main.console_remote()")
+
+        result = None
+        if self.is_remote is True:
+            # Stop previous remote console
+            if self.console_output is not None:
+                self.console_output.stop()
+            if host is not None:
+                # Create and start our remote console
+                self.console_output = RemoteConsole(host, self.conport, screen)
+                self.console_output.start()
+            else:
+                self.console_output = None
+
+        self.mtda.debug(3, "main.console_remote(): %s" % str(result))
 
     def target_on(self,args=None):
         result=True
