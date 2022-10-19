@@ -114,6 +114,28 @@ class MTDA_Application:
             else:
                 print("unknown console command '%s'!" %(cmd) , file=sys.stderr)
 
+
+    def console_pastebin(self):
+        client = self.agent
+        server = self.client()
+        api_key = client.pastebin_api_key()
+        endpoint = client.pastebin_endpoint()
+        if api_key is None or endpoint is None:
+            server.console_print(
+                    "\r\n*** key/endpoint for pastebin "
+                    "are not configured! ***\r\n")
+            return
+        data = {
+                'api_dev_key': api_key,
+                'api_option': 'paste',
+                'api_paste_code': self.client().console_dump(),
+                'api_paste_format': 'python'
+               }
+        r = requests.post(url=endpoint, data=data)
+        server = self.client()
+        server.console_print(
+            "\r\n*** console buffer posted to %s ***\r\n" % (r.text))
+
     def console_interactive(self, args=None):
         client = self.agent
         server = self.client()
@@ -143,6 +165,62 @@ class MTDA_Application:
                 server.console_send(c, True)
             else:
                 server.monitor_send(c, True)
+
+
+     def console_menukey(self, c):
+        client = self.agent
+        server = self.client()
+        if c == 'a':
+            status = server.target_lock()
+            if status is True:
+                server.console_print("\r\n*** Target was acquired ***\r\n")
+        elif c == 'b':
+            self.console_pastebin()
+        elif c == 'c':
+            if self.screen.capture_enabled() is False:
+                self.screen.print(b"\r\n*** Screen capture started... ***\r\n")
+                self.screen.capture_start()
+            else:
+                self.screen.capture_stop()
+                self.screen.print(b"\r\n*** Screen capture stopped ***\r\n")
+        elif c == 'i':
+            self.target_info()
+        elif c == 'm':
+            if self.channel == 'console':
+                # Switch the alternate screen buffer
+                print("\x1b[?1049h")  # same as tput smcup
+                self.channel = 'monitor'
+            else:
+                # Return to the main screen buffer
+                print("\x1b[?1049l")  # same as tput rmcup
+                self.channel = 'console'
+            client.console_toggle()
+        elif c == 'p':
+            previous_status = server.target_status()
+            server.target_toggle()
+            new_status = server.target_status()
+            if previous_status != new_status:
+                server.console_print(
+                    "\r\n*** Target is now %s ***\r\n" % (new_status))
+        elif c == 'q':
+            self.screen.capture_stop()
+            self.exiting = True
+        elif c == 'r':
+            status = server.target_unlock()
+            if status is True:
+                server.console_print("\r\n*** Target was released ***\r\n")
+        elif c == 's':
+            previous_status, writing, written = server.storage_status()
+            server.storage_swap()
+            new_status, writing, written = server.storage_status()
+            if new_status != previous_status:
+                server.console_print(
+                    "\r\n*** Storage now connected to "
+                    "%s ***\r\n" % (new_status))
+        elif c == 't':
+            server.toggle_timestamps()
+        elif c == 'u':
+            server.usb_toggle(1)
 
 
 

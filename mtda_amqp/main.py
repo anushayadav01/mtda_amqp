@@ -2,6 +2,9 @@
 import pika
 import os
 
+from mtda.console.remote import RemoteConsole, RemoteMonitor
+from mtda.console.input import ConsoleInput
+
 
 class MTDA_AMQP(object):
 
@@ -42,7 +45,7 @@ class MTDA_AMQP(object):
         self.mtda.debug(3, "main.console_prefix_key()")
         return self.prefix_key
 
-     def _prefix_key_code(self, prefix_key):
+    def _prefix_key_code(self, prefix_key):
         prefix_key = prefix_key.lower()
         key_dict = {'ctrl-a': '\x01', 'ctrl-b': '\x02', 'ctrl-c': '\x03',
                     'ctrl-d': '\x04', 'ctrl-e': '\x05', 'ctrl-f': '\x06',
@@ -60,6 +63,29 @@ class MTDA_AMQP(object):
         else:
             raise ValueError("the prefix key specified '{0}' is not "
                              "supported".format(prefix_key))
+
+    def console_init(self):
+        self.console_input = ConsoleInput()
+        self.console_input.start()
+
+    def console_send(self, data, raw=False, session=None):
+        self.mtda.debug(3, "main.console_send()")
+        self._session_check(session)
+        result = None
+        if self.console_locked(session) is False and \
+           self.console_logger is not None:
+            result = self.console_logger.write(data, raw)
+
+        self.mtda.debug(3, "main.console_send(): %s" % str(result))
+
+    def console_locked(self, session=None):
+        self.mtda.debug(3, "main.console_locked()")
+
+        self._session_check(session)
+        result = self._check_locked(session)
+
+        self.mtda.debug(3, "main.console_locked(): %s" % str(result))
+        return result
 
 
     def console_getkey(self):
@@ -86,6 +112,26 @@ class MTDA_AMQP(object):
         os.system("echo 0 >/sys/class/gpio/gpio203/value")
         return result
 
+    def _target_status(self, session=None):
+        self.mtda.debug(3, "main._target_status()")
+
+        if self.power_controller is None:
+            result = CONSTS.POWER.UNSURE
+        else:
+            result = self.power_controller.status()
+
+        self.mtda.debug(3, "main._target_status(): {}".format(result))
+        return result
+
+    def target_status(self, session=None):
+        self.mtda.debug(3, "main.target_status()")
+
+        with self._power_lock:
+            result = self._target_status(session)
+
+        self.mtda.debug(3, "main.target_status(): {}".format(result))
+        return
+
 
     def monitor_remote(self, host, screen):
         self.mtda.debug(3, "main.monitor_remote()")
@@ -105,6 +151,18 @@ class MTDA_AMQP(object):
                 self.monitor_output = None
 
         self.mtda.debug(3, "main.monitor_remote(): %s" % str(result))
+        return result
+
+    def monitor_send(self, data, raw=False, session=None):
+        self.mtda.debug(3, "main.monitor_send()")
+
+        self._session_check(session)
+        result = None
+        if self.console_locked(session) is False and \
+           self.monitor_logger is not None:
+            result = self.monitor_logger.write(data, raw)
+
+        self.mtda.debug(3, "main.monitor_send(): %s" % str(result))
         return result
 
     def on_request(self,ch, method, props, body):

@@ -51,6 +51,12 @@ class Client:
         self.response = None
         self.corr_id = None
 
+    def console_dump(self):
+        return self._impl.console_dump(self._session)
+
+    def console_print(self, data):
+        return self._impl.console_print(data, self._session)
+
     def console_remote(self, host, screen):
         return self._agent.console_remote(host, screen)
     
@@ -68,6 +74,50 @@ class Client:
 
     def monitor_send(self, data, raw=False):
         return self._impl.monitor_send(data, raw, self._session)
+
+    def pastebin_api_key(self):
+        return self._agent.pastebin_api_key()
+
+    def start(self):
+        return self._agent.start()
+
+    def stop(self):
+        if self._agent.remote is not None:
+            self._impl.close()
+        else:
+            self._agent.stop()
+
+      def storage_close(self):
+        return self._impl.storage_close(self._session)
+
+    def storage_locked(self):
+        return self._impl.storage_locked(self._session)
+
+    def storage_mount(self, part=None):
+        return self._impl.storage_mount(part, self._session)
+
+    def storage_open(self):
+        tries = 60
+        while tries > 0:
+            tries = tries - 1
+            status = self._impl.storage_open(self._session)
+            if status is True:
+                return True
+            time.sleep(1)
+        return False
+
+    def storage_status(self):
+        return self._impl.storage_status(self._session)
+
+    def target_locked(self):
+        return self._impl.target_locked(self._session)
+
+
+    def remote(self):
+        return self._agent.remote
+
+    def session(self):
+        return self.
         
     def on_response(self, ch, method, props, body):
         if self.corr_id == props.correlation_id:
