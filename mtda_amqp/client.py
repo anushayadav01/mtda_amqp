@@ -100,10 +100,14 @@ class Client:
         return False
 
     def storage_status(self):
-        return self._impl.storage_status(self._session)
+        self._impl('{"storage_status":["%s"]}'%(self._session))
+        print("I am waiting in storage status")
+        response = self.response
+        print(response)
+        return response	
 
     def target_locked(self):
-        return self._impl("target_locked(%s)"%(self._session))
+        return self._impl('{"target_locked":["%s"]}'%(self._session))
 
 
     def remote(self):
@@ -113,8 +117,11 @@ class Client:
         return self._session
         
     def on_response(self, ch, method, props, body):
+        print("HI I am waiting")
+        print(body)
         if self.corr_id == props.correlation_id:
             self.response = body
+
 
     def call(self, n):
         self.response = None
