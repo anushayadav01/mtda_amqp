@@ -1,10 +1,10 @@
 #!/usr/bin/env python
 import pika
-import os
-
-from mtda.console.remote import RemoteConsole, RemoteMonitor
-from mtda.console.input import ConsoleInput
-
+import os,sys,time,threading
+from mtda_amqp.console.remote import RemoteConsole, RemoteMonitor
+import mtda_amqp.constants as CONSTS
+from mtda_amqp.console.input import ConsoleInput
+import json
 DEFAULT_PREFIX_KEY = 'ctrl-a'
 DEFAULT_PASTEBIN_EP = "http://pastebin.com/api/api_post.php"
 
@@ -13,7 +13,9 @@ class MTDA_AMQP(object):
     def __init__(self):
         self.connection = pika.BlockingConnection(pika.URLParameters('amqp://admin:password@134.86.62.153:5672'))
         self.channel = self.connection.channel()
+        
         self.channel.queue_declare(queue='mtda-amqp')
+        self.channel.queue_purge(queue='mtda-amqp')
         self.channel.basic_qos(prefetch_count=1)
         self.channel.basic_consume(queue='mtda-amqp', on_message_callback=self.on_request)
         self.monitor = None
@@ -25,15 +27,11 @@ class MTDA_AMQP(object):
         self.conport = 5557
         self.ctrlport = 5556
         self.prefix_key = self._prefix_key_code(DEFAULT_PREFIX_KEY)
-
-
-    def fib(n):
-        if n == 0:
-            return 0
-        elif n == 1:
-            return 1
-        else:
-            return fib(n - 1) + fib(n - 2)
+        self._sessions = {}
+        self._session_lock = threading.Lock()
+        self._session_timeout=CONSTS.SESSION.MIN_TIMEOUT
+        self._lock_owner= None
+        self.storage_controller = None
 
     def debug(self, level, msg):
         if self.debug_level >= level:
@@ -71,6 +69,15 @@ class MTDA_AMQP(object):
         else:
             raise ValueError("the prefix key specified '{0}' is not "
                              "supported".format(prefix_key))
+    
+
+    def _check_locked(self, session):
+        #self.mtda.debug(3, "main._check_locked()")
+        owner = self.target_owner()
+        if owner is None:
+            return False
+        status = False if session == owner else True
+        return status
 
     def console_init(self):
         self.console_input = ConsoleInput()
@@ -124,6 +131,71 @@ class MTDA_AMQP(object):
 
         self.mtda.debug(3, "main.console_remote(): %s" % str(result))
 
+
+    def _session_check(self, session=None):
+        #self.mtda.debug(3, "main._session_check(%s)" % str(session))
+
+        events = []
+        now = time.monotonic()
+        power_off = False
+        result = None
+
+        with self._session_lock:
+            # Register new session
+            if session is not None:
+                if session not in self._sessions:
+                    events.append("ACTIVE %s" % session)
+                self._sessions[session] = now + self._session_timeout
+
+            # Check for inactive sessions
+            inactive = []
+            for s in self._sessions:
+                left = self._sessions[s] - now
+                #self.mtda.debug(3, "session %s: %d seconds" % (s, left))
+                if left <= 0:
+                    inactive.append(s)
+            for s in inactive:
+                events.append("INACTIVE %s" % s)
+                self._sessions.pop(s, "")
+
+                # Check if we should arm the auto power-off timer
+                # i.e. when the last session is removed and a power timeout
+                # was set
+                if len(self._sessions) == 0 and self._power_timeout > 0:
+                    self._power_expiry = now + self._power_timeout
+                    #self.mtda.debug(2, "device will be powered down in {} "
+                    #                   "seconds".format(self._power_timeout))
+
+            if len(self._sessions) > 0:
+                # There are active sessions: reset power expiry
+                self._power_expiry = None
+            else:
+                # Otherwise check if we should auto-power off the target
+                if self._power_expiry is not None and now > self._power_expiry:
+                    self._lock_expiry = 0
+                    power_off = True
+
+            # Release device if the session owning the lock is idle
+            if self._lock_owner is not None:
+                if session == self._lock_owner:
+                    self._lock_expiry = now + self._lock_timeout
+                elif now >= self._lock_expiry:
+                    events.append("UNLOCKED %s" % self._lock_owner)
+                    self._lock_owner = None
+
+        # Send event sessions generated above
+        for e in events:
+            self._session_event(e)
+
+        # Check if we should auto power-off the device
+        if power_off is True:
+            self._target_off()
+            #self.mtda.debug(2, "device powered down after {} seconds of "
+            #                   "inactivity".format(self._power_timeout))
+
+        #self.mtda.debug(3, "main._session_check: %s" % str(result))
+        return result
+
     def target_on(self,args=None):
         result=True
         print("The target is powered on")
@@ -139,14 +211,11 @@ class MTDA_AMQP(object):
         return result
 	
     def target_locked(self, session):
-        self.mtda.debug(3, "main.target_locked()")
-
         self._session_check(session)
         return self._check_locked(session)
 
     def target_owner(self):
-        self.mtda.debug(3, "main.target_owner()")
-
+        #self.mtda.debug(3, "main.target_owner()")
         return self._lock_owner
 
     def _target_status(self, session=None):
@@ -168,7 +237,27 @@ class MTDA_AMQP(object):
 
         self.mtda.debug(3, "main.target_status(): {}".format(result))
         return
+    
+    def _session_event(self, info):
+        result = None
+        #if info is not None:
+        #    self.notify(CONSTS.EVENTS.SESSION, info)
+        return result
 
+    def storage_status(self, session=None):
+        #self.mtda.debug(3, "main.storage_status()")
+
+        self._session_check(session)
+        print("I am here")
+        if self.storage_controller is None:
+            #self.mtda.debug(4, "storage_status(): no shared storage device")
+            result = CONSTS.STORAGE.UNKNOWN, False, 0
+        else:
+            status = self.storage_controller.status()
+            result = status, self._writer.writing, self._writer.written
+
+        #self.mtda.debug(3, "main.storage_status(): %s" % str(result))
+        return result
 
     def monitor_remote(self, host, screen):
         self.mtda.debug(3, "main.monitor_remote()")
@@ -203,14 +292,22 @@ class MTDA_AMQP(object):
         return result
 
     def on_request(self,ch, method, props, body):
-        if str(body.decode('UTF-8'))=="target_on":
-            print(body,type(body))
-            response=self.target_on()
-        elif str(body.decode('UTF-8'))=="target_off":
-            response=self.target_off()
+        body = str(body.decode('UTF-8'))
+        cmd_dict = {'target_locked':self.target_locked,
+                    'target_on': self.target_on,
+                    'target_off' : self.target_off,
+                    'storage_status':self.storage_status}
+        if ":" in body:
+            print(body)
+            function_call_dict = eval(body)
+            function_name = list(function_call_dict.keys())[0]
+            arguments = function_call_dict[function_name]
+            response = cmd_dict[function_name](*arguments)
         else:
-            response=self.fib(int(body))
+            response = cmd_dict[body]()
+        print("HIiwhdeidheidheihe",response) 
         ch.basic_publish(exchange='',routing_key=props.reply_to,properties=pika.BasicProperties(correlation_id =props.correlation_id),body=str(response))
+        #ch.basic_publish(exchange='',routing_key='mtda-amqp',properties=pika.BasicProperties(correlation_id =props.correlation_id),body=str(response))
         ch.basic_ack(delivery_tag=method.delivery_tag)
 
     def run_server(self):

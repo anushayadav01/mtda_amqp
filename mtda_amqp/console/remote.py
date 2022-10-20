@@ -11,7 +11,7 @@ class RemoteConsole(ConsoleOutput):
         self.socket = None
         self.topic = CONSTS.CHANNEL.CONSOLE
 
-    def stop(self):
+     def stop(self):
         super().stop()
         if self.context is not None:
             self.context.term()
