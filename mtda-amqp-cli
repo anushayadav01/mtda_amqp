@@ -25,6 +25,8 @@ class MTDA_Application:
         self.exiting = False
         self.channel = "console"
 
+    def debug(self, level, msg):
+        self.client().debug(level, msg)
 
     def target_info(self, args=None):
         sys.stdout.write("\rFetching target information...\r")
@@ -250,6 +252,8 @@ class MTDA_Application:
        
             if daemonize is True:
                 self.agent = MTDA_AMQP()
+                self.agent.load_config(None, daemonize, config)
+                self.agent.start()
                 self.agent.run_server()
 
         if len(stuff) == 0:

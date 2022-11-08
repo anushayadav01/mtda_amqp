@@ -1,5 +1,5 @@
-from mtda.console.output import ConsoleOutput
-import mtda.constants as CONSTS
+from mtda_amqp.console.output import ConsoleOutput
+import mtda_amqp.constants as CONSTS
 
 class RemoteConsole(ConsoleOutput):
 

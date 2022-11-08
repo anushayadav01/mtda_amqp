@@ -1,30 +1,46 @@
 #!/usr/bin/env python
-import pika
+import pika,importlib
 import os,sys,time,threading
 import json
-
+import configparser
+import traceback
 from mtda_amqp.console.remote import RemoteConsole, RemoteMonitor
 import mtda_amqp.constants as CONSTS
 from mtda_amqp.console.input import ConsoleInput
 from mtda_amqp import __version__
+from mtda_amqp.storage.writer import AsyncImageWriter
+import mtda_amqp.keyboard.controller
+import mtda_amqp.power.controller
+import mtda_amqp.utils
+from mtda_amqp.console.logger import ConsoleLogger
 
 DEFAULT_PREFIX_KEY = 'ctrl-a'
 DEFAULT_PASTEBIN_EP = "http://pastebin.com/api/api_post.php"
 
+_NOPRINT_TRANS_TABLE = {
+    i: '.' for i in range(0, sys.maxunicode + 1) if not chr(i).isprintable()
+}
+
+def _make_printable(s):
+    return s.translate(_NOPRINT_TRANS_TABLE)
+
 class MTDA_AMQP:
 
     def __init__(self):
+        global connection_props
         self.connection = pika.BlockingConnection(pika.URLParameters('amqp://admin:password@134.86.62.153:5672'))
         self.channel = self.connection.channel()
-        
-        self.channel.queue_declare(queue='mtda-amqp')
+        self.config_files = ['mtda.ini'] 
+        self.props_result=self.channel.queue_declare(queue='mtda-amqp')
         self.channel.queue_purge(queue='mtda-amqp')
         self.channel.basic_qos(prefetch_count=1)
         self.channel.basic_consume(queue='mtda-amqp', on_message_callback=self.on_request)
+        self.console_logger = None
+        self.mtda = self
         self.monitor = None
         self.monitor_logger = None
         self.monitor_output = None
-        self.debug_level = 0
+        self.debug_level = 3
         self.is_remote = False
         self.console_output = None
         self.conport = 5557
@@ -38,9 +54,47 @@ class MTDA_AMQP:
         self._power_lock = threading.Lock()
         self.power_controller = None
         self.version=__version__
+        self.usb_switches = []
+        self._power_expiry = None
+        self.video = None
+        self._power_timeout=1440
+        self.storage_controller = None
+        self.console = None
+        self.keyboard = None
+        self.assistant = None
+        self.power_monitors = []
+        self.env = {}
+        self._time_from_str = None
+        self._time_until_str = None
+        self._socket_lock = threading.Lock()
+
+
+        # Config file in $HOME/.mtda/config
+        home = os.getenv('HOME', '')
+        if home != '':
+            self.config_files.append(os.path.join(home, '.mtda', 'config'))
+
+        # Config file in /etc/mtda/config
+        if os.path.exists('/etc'):
+            self.config_files.append(os.path.join('/etc', 'mtda', 'config'))
+
 
     def agent_version(self):
-        return self.version
+        return self.version.__version__
+
+    def config_set_power_timeout(self, timeout, session=None):
+        #self.mtda.debug(3, "main.config_set_power_timeout()")
+
+        result = self._power_timeout
+        self._power_timeout = timeout
+        if timeout == 0:
+            self._power_expiry = None
+        self._session_check()
+
+       # self.mtda.debug(3, "main.config_set_power_timeout(): "
+         #                  "{}".format(result))
+        return result
+
 
     def _check_locked(self, session):
         #self.mtda.debug(3, "main._check_locked()")
@@ -57,22 +111,23 @@ class MTDA_AMQP:
         self.console_input.start()
 
     def console_send(self, data, raw=False, session=None):
-        self.mtda.debug(3, "main.console_send()")
+        # self.mtda.debug(3, "main.console_send()")
         self._session_check(session)
         result = None
         if self.console_locked(session) is False and \
            self.console_logger is not None:
             result = self.console_logger.write(data, raw)
+            print(result)
 
-        self.mtda.debug(3, "main.console_send(): %s" % str(result))
+       # self.mtda.debug(3, "main.console_send(): %s" % str(result))
 
     def console_locked(self, session=None):
-        self.mtda.debug(3, "main.console_locked()")
+        # self.mtda.debug(3, "main.console_locked()")
 
         self._session_check(session)
         result = self._check_locked(session)
 
-        self.mtda.debug(3, "main.console_locked(): %s" % str(result))
+        #self.mtda.debug(3, "main.console_locked(): %s" % str(result))
         return result
 
     def console_getkey(self):
@@ -86,7 +141,8 @@ class MTDA_AMQP:
         return result
 
     def console_remote(self, host, screen):
-        self.mtda.debug(3, "main.console_remote()")
+        print('There in console remote')
+        #self.mtda.debug(3, "main.console_remote()")
 
         result = None
         if self.is_remote is True:
@@ -106,8 +162,379 @@ class MTDA_AMQP:
         # self.mtda.debug(3, "main.console_prefix_key()")
         return self.prefix_key
 
+    def debug(self, level, msg):
+        if self.debug_level >= level:
+            if self.debug_level == 0:
+                prefix = "# "
+            else:
+                prefix = "# debug%d: " % level
+            msg = str(msg).replace("\n", "\n%s ... " % prefix)
+            lines = msg.splitlines()
+            sys.stderr.buffer.write(prefix.encode("utf-8"))
+            for line in lines:
+                sys.stderr.buffer.write(_make_printable(line).encode("utf-8"))
+                sys.stderr.buffer.write(b"\n")
+                sys.stderr.buffer.flush()
+
+
+    def env_set(self, name, value, session=None):
+        #self.mtda.debug(3, "env_set()")
+
+        self._session_check(session)
+        result = None
+
+        if name in self.env:
+            old_value = self.env[name]
+            result = old_value
+        else:
+            old_value = value
+
+        self.env[name] = value
+        self.env["_%s" % name] = old_value
+
+        #self.mtda.debug(3, "env_set(): %s" % str(result))
+        return result
+
+    def load_environment(self, parser):
+        #self.mtda.debug(3, "main.load_environment()")
+
+        for opt in parser.options('environment'):
+            value = parser.get('environment', opt)
+            #self.mtda.debug(4, "main.load_environment(): "
+            #                   "%s => %s" % (opt, value))
+            self.env_set(opt, value)
+
+    def load_main_config(self, parser):
+        #self.mtda.debug(3, "main.load_main_config()")
+
+        # Name of this agent
+        print(parser)
+        self.name = parser.get('main', 'name', fallback=self.name)
+
+        self.mtda.debug_level = int(
+            parser.get('main', 'debug', fallback=self.mtda.debug_level))
+        self.mtda.fuse = parser.getboolean(
+            'main', 'fuse', fallback=self.mtda.fuse)
+
+    def load_config(self, remote=None, is_server=False, config_files=None):
+        self.mtda.debug(3, "main.load_config()")
+
+        if config_files is None:
+            config_files = os.getenv('MTDA_CONFIG', self.config_files)
+
+        #self.mtda.debug(2, "main.load_config(): "
+        #                   "config_files={}".format(config_files))
+
+        self.remote = remote
+        self.is_remote = remote is not None
+        self.is_server = is_server
+        parser = configparser.ConfigParser()
+        configs_found = parser.read(config_files)
+        if configs_found is False:
+            return
+        '''
+        if parser.has_section('main'):
+            self.load_main_config(parser)
+        if parser.has_section('pastebin'):
+            self.load_pastebin_config(parser)
+        if parser.has_section('remote'):
+            self.load_remote_config(parser)
+        self.load_timeouts_config(parser)
+        if parser.has_section('ui'):
+            self.load_ui_config(parser)
+        '''
+        if self.is_remote is False and is_server is True:
+            if parser.has_section('assistant'):
+                self.load_assistant_config(parser)
+            '''
+            if parser.has_section('environment'):
+                self.load_environment(parser)
+            '''
+            if parser.has_section('power'):
+                self.load_power_config(parser)
+            if parser.has_section('console'):
+                self.load_console_config(parser)
+            if parser.has_section('keyboard'):
+                self.load_keyboard_config(parser)
+            if parser.has_section('monitor'):
+                self.load_monitor_config(parser)
+            if parser.has_section('storage'):
+                self.load_storage_config(parser)
+            if parser.has_section('usb'):
+                self.load_usb_config(parser)
+            if parser.has_section('video'):
+                self.load_video_config(parser)
+            if parser.has_section('scripts'):
+                scripts = parser['scripts']
+                self.power_on_script = self._parse_script(
+                    scripts.get('power on', None))
+                self.power_off_script = self._parse_script(
+                    scripts.get('power off', None))
+            '''
+            # web-base UI
+            if www_support is True:
+                self._www = mtda.www.Service(self)
+                if parser.has_section('www'):
+                    self.load_www_config(parser)
+            '''
+
+    def load_assistant_config(self, parser):
+        #self.mtda.debug(3, "main.load_assistant_config()")
+
+        try:
+            # Get variant
+            variant = parser.get('assistant', 'variant')
+            # Try loading its support class
+            mod = importlib.import_module("mtda_amqp.assistant." + variant)
+            factory = getattr(mod, 'instantiate')
+            self.assistant = factory(self)
+            self.assistant.variant = variant
+            # Configure the assistant
+            self.assistant.configure(dict(parser.items('assistant')))
+        except configparser.NoOptionError:
+            print('assistant variant not defined!', file=sys.stderr)
+        except ImportError:
+            print('assistant "%s" could not be found/loaded!' % (
+                variant), file=sys.stderr)
+
+    def load_console_config(self, parser):
+        #self.mtda.debug(3, "main.load_console_config()")
+
+        try:
+            # Get variant
+            variant = parser.get('console', 'variant')
+            # Try loading its support class
+            mod = importlib.import_module("mtda_amqp.console." + variant)
+            factory = getattr(mod, 'instantiate')
+            self.console = factory(self)
+            self.console.variant = variant
+            # Configure the console
+            config = dict(parser.items('console'))
+            self.console.configure(config)
+            timestamps = parser.getboolean('console', 'timestamps',
+                                           fallback=None)
+            self._time_from_pwr = timestamps
+            if timestamps is None or timestamps is True:
+                # check 'time-from' / 'time-until' settings if timestamps is
+                # either yes or unspecified
+                if 'time-until' in config:
+                    self._time_until_str = config['time-until']
+                    self._time_from_pwr = True
+                if 'time-from' in config:
+                    self._time_from_str = config['time-from']
+                    self._time_from_pwr = False
+        except configparser.NoOptionError:
+            print('console variant not defined!', file=sys.stderr)
+        except ImportError:
+            traceback.print_exc()
+            print('console "%s" could not be found/loaded!' % (
+                variant), file=sys.stderr)
+
+    def load_keyboard_config(self, parser):
+        #self.mtda.debug(3, "main.load_keyboard_config()")
+
+        try:
+            # Get variant
+            variant = parser.get('keyboard', 'variant')
+            # Try loading its support class
+            mod = importlib.import_module("mtda_amqp.keyboard." + variant)
+            factory = getattr(mod, 'instantiate')
+            self.keyboard = factory(self)
+            # Configure the keyboard controller
+            self.keyboard.configure(dict(parser.items('keyboard')))
+        except configparser.NoOptionError:
+            print('keyboard controller variant not defined!', file=sys.stderr)
+        except ImportError:
+            print('keyboard controller "%s" could not be found/loaded!' % (
+                variant), file=sys.stderr)
+
+    def load_monitor_config(self, parser):
+        #self.mtda.debug(3, "main.load_monitor_config()")
+
+        try:
+            # Get variant
+            variant = parser.get('monitor', 'variant')
+            # Try loading its support class
+            mod = importlib.import_module("mtda_amqp.console." + variant)
+            factory = getattr(mod, 'instantiate')
+            self.monitor = factory(self)
+            self.monitor.variant = variant
+            # Configure the monitor console
+            self.monitor.configure(dict(parser.items('monitor')), 'monitor')
+        except configparser.NoOptionError:
+            print('monitor variant not defined!', file=sys.stderr)
+        except ImportError:
+            print('monitor "%s" could not be found/loaded!' % (
+                variant), file=sys.stderr)
+
+    def load_pastebin_config(self, parser):
+        #self.mtda.debug(3, "main.load_pastebin_config()")
+        self._pastebin_api_key = parser.get('pastebin', 'api-key',
+                                            fallback='')
+        self._pastebin_endpoint = parser.get('pastebin', 'endpoint',
+                                             fallback=DEFAULT_PASTEBIN_EP)
+
+    def load_power_config(self, parser):
+        #self.mtda.debug(3, "main.load_power_config()")
+
+        try:
+            # Get variant
+            variant = parser.get('power', 'variant')
+            # Try loading its support class
+            mod = importlib.import_module("mtda_amqp.power." + variant)
+            factory = getattr(mod, 'instantiate')
+            self.power_controller = factory(self)
+            self.power_controller.variant = variant
+            print(self.power_controller.variant)
+            # Configure the power controller
+            self.power_controller.configure(dict(parser.items('power')))
+        except configparser.NoOptionError:
+            print('power controller variant not defined!', file=sys.stderr)
+        except ImportError:
+            print('power controller "%s" could not be found/loaded!' % (
+                variant), file=sys.stderr)
+
+    def load_storage_config(self, parser):
+        #self.mtda.debug(3, "main.load_storage_config()")
+
+        try:
+            # Get variant
+            variant = parser.get('storage', 'variant')
+            print(variant)
+            # Try loading its support class
+            mod = importlib.import_module("mtda_amqp.storage." + variant)
+            factory = getattr(mod, 'instantiate')
+            self.storage_controller = factory(self)
+            self._writer = AsyncImageWriter(self, self.storage_controller)
+            # Configure the storage controller
+            self.storage_controller.configure(dict(parser.items('storage')))
+        except configparser.NoOptionError:
+            print('storage controller variant not defined!', file=sys.stderr)
+        except ImportError as e:
+            traceback.print_exc()
+            print(f'The error in storage config {e}')
+            print('power controller "%s" could not be found/loaded!' % (
+                variant), file=sys.stderr)
+
+    def load_remote_config(self, parser):
+        #self.mtda.debug(3, "main.load_remote_config()")
+
+        self.conport = int(
+            parser.get('remote', 'console', fallback=self.conport))
+        self.ctrlport = int(
+            parser.get('remote', 'control', fallback=self.ctrlport))
+        if self.is_server is False:
+            if self.remote is None:
+                # Load remote setting from the configuration
+                self.remote = parser.get(
+                    'remote', 'host', fallback=self.remote)
+                # Allow override from the environment
+                self.remote = os.getenv('MTDA_REMOTE', self.remote)
+
+            # Attempt to resolve remote using Zeroconf
+            watcher = mtda.discovery.Watcher(CONSTS.MDNS.TYPE)
+            ip = watcher.lookup(self.remote)
+            if ip is not None:
+                self.debug(2, "resolved '{}' ({}) "
+                              "using Zeroconf".format(self.remote, ip))
+                self.remote = ip
+        else:
+            self.remote = None
+        self.is_remote = self.remote is not None
+
+    def load_timeouts_config(self, parser):
+        # self.mtda.debug(3, "main.load_timeouts_config()")
+
+        result = None
+        s = "timeouts"
+
+        self._lock_timeout = int(parser.get(s, "lock",
+                                 fallback=CONSTS.DEFAULTS.LOCK_TIMEOUT))
+        self._power_timeout = int(parser.get(s, "power",
+                                  fallback=CONSTS.DEFAULTS.POWER_TIMEOUT))
+        self._session_timeout = int(parser.get(s, "session",
+                                    fallback=CONSTS.DEFAULTS.SESSION_TIMEOUT))
+
+        self._lock_timeout = self._lock_timeout * 60
+        self._power_timeout = self._power_timeout * 60
+        self._session_timeout = self._session_timeout * 60
+
+        #self.mtda.debug(3, "main.load_timeouts_config: %s" % str(result))
+        return result
+
+    def load_ui_config(self, parser):
+        #self.mtda.debug(3, "main.load_ui_config()")
+        self.prefix_key = self._prefix_key_code(parser.get(
+            'ui', 'prefix', fallback=DEFAULT_PREFIX_KEY))
+
+    def load_usb_config(self, parser):
+        #self.mtda.debug(3, "main.load_usb_config()")
+
+        try:
+            # Get number of ports
+            usb_ports = int(parser.get('usb', 'ports'))
+            for port in range(0, usb_ports):
+                port = port + 1
+                section = "usb" + str(port)
+                if parser.has_section(section):
+                    self.load_usb_port_config(parser, section)
+        except configparser.NoOptionError:
+            usb_ports = 0
+
+    def load_usb_port_config(self, parser, section):
+        #self.mtda.debug(3, "main.load_usb_port_config()")
+
+        try:
+            # Get attributes
+            className = parser.get(section, 'class', fallback="")
+            variant = parser.get(section, 'variant')
+
+            # Try loading its support class
+            mod = importlib.import_module("mtda_amqp.usb." + variant)
+            factory = getattr(mod, 'instantiate')
+            usb_switch = factory(self)
+
+            # Configure and probe the USB switch
+            usb_switch.configure(dict(parser.items(section)))
+            usb_switch.probe()
+
+            # Store other attributes
+            usb_switch.className = className
+
+            # Add this USB switch
+            self.usb_switches.append(usb_switch)
+        except configparser.NoOptionError:
+            print('usb switch variant not defined!', file=sys.stderr)
+        except ImportError:
+            print('usb switch "%s" could not be found/loaded!' % (
+                variant), file=sys.stderr)
+
+    def load_video_config(self, parser):
+        #self.mtda.debug(3, "main.load_video_config()")
+
+        try:
+            # Get variant
+            variant = parser.get('video', 'variant')
+            # Try loading its support class
+            mod = importlib.import_module("mtda_amqp.video." + variant)
+            factory = getattr(mod, 'instantiate')
+            self.video = factory(self)
+            # Configure the video controller
+            self.video.configure(dict(parser.items('video')))
+        except configparser.NoOptionError:
+            print('video controller variant not defined!', file=sys.stderr)
+        except ImportError:
+            print('video controller "%s" could not be found/loaded!' % (
+                variant), file=sys.stderr)
+
+    def load_www_config(self, parser):
+        #self.mtda.debug(3, "main.load_www_config()")
+
+        if www_support is True:
+            self._www.configure(dict(parser.items('www')))
+
     def monitor_remote(self, host, screen):
-        self.mtda.debug(3, "main.monitor_remote()")
+        #self.mtda.debug(3, "main.monitor_remote()")
 
         result = None
         if self.is_remote is True:
@@ -137,7 +564,32 @@ class MTDA_AMQP:
 
         self.mtda.debug(3, "main.monitor_send(): %s" % str(result))
         return result
+    
+    def notify(self, what):
+        self.mtda.debug(3, "main.notify({})".format(what))
 
+        result = None
+        if self.socket is not None:
+            with self._socket_lock:
+                #self.socket.send(CONSTS.CHANNEL.EVENTS, flags=zmq.SNDMORE)
+                self.publish_data("{}".format(what))
+                #self.socket.send_string("{} {}".format(what, info))
+        #if self._www is not None:
+        #    self._www.notify(what, info)
+
+        self.mtda.debug(3, "main.notify: {}".format(result))
+        return result
+
+    def _parse_script(self, script):
+        #self.mtda.debug(3, "main._parse_script()")
+
+        result = None
+        if script is not None:
+            result = script.replace("... ", "    ")
+
+        #self.mtda.debug(3, "main._parse_script(): %s" % str(result))
+        return result
+    
     def _prefix_key_code(self, prefix_key):
         prefix_key = prefix_key.lower()
         key_dict = {'ctrl-a': '\x01', 'ctrl-b': '\x02', 'ctrl-c': '\x03',
@@ -157,6 +609,17 @@ class MTDA_AMQP:
             raise ValueError("the prefix key specified '{0}' is not "
                              "supported".format(prefix_key))
     
+
+    def power_locked(self, session=None):
+        # self.mtda.debug(3, "main.power_locked()")
+
+        self._session_check(session)
+        if self.power_controller is None:
+            result = True
+        else:
+            result = self._check_locked(session)
+        print("The power locked {result}")
+
     def _session_check(self, session=None):
         #self.mtda.debug(3, "main._session_check(%s)" % str(session))
 
@@ -209,7 +672,6 @@ class MTDA_AMQP:
                     self._lock_owner = None
 
         # Send event sessions generated above
-        print(f"events are {events}")
         for e in events:
             self._session_event(e)
 
@@ -228,9 +690,153 @@ class MTDA_AMQP:
         #    self.notify(CONSTS.EVENTS.SESSION, info)
         return result
 
+    def start(self):
+        #self.mtda.debug(3, "main.start()")
+
+        if self.is_remote is True:
+            return True
+
+        # Probe the specified power controller
+        if self.power_controller is not None:
+            status = self.power_controller.probe()
+            if status is False:
+                print('Probe of the Power Controller failed!', file=sys.stderr)
+                return False
+
+        # Probe the specified storage controller
+        if self.storage_controller is not None:
+            status = self.storage_controller.probe()
+            if status is False:
+                print('Probe of the shared storage device failed!',
+                      file=sys.stderr)
+                return False
+
+        if self.console is not None:
+            # Create a publisher
+            #if self.is_server is True:
+            #    context = zmq.Context()
+            #    socket = context.socket(zmq.PUB)
+            #    socket.bind("tcp://*:%s" % self.conport)
+            #else:
+            #    socket = None
+            self.socket = self.channel
+            # Create and start console logger
+            status = self.console.probe()
+            if status is False:
+                print('Probe of the %s console failed!' % (
+                      self.console.variant), file=sys.stderr)
+                return False
+            self.console_logger = ConsoleLogger(
+               self, self.console, self.socket,self.power_controller, b'CON', None)
+            if self._time_from_str is not None:
+                self.console_logger.time_from = self._time_from_str
+            if self._time_until_str is not None:
+                self.console_logger.time_until = self._time_until_str
+            if self._time_from_pwr is not None and self._time_from_pwr is True:
+                self.toggle_timestamps()
+            self.console_logger.start()
+
+        if self.monitor is not None:
+            # Create and start console logger
+            status = self.monitor.probe()
+            if status is False:
+                print('Probe of the %s monitor console failed!' % (
+                      self.monitor.variant), file=sys.stderr)
+                return False
+            self.monitor_logger = ConsoleLogger(
+                self, self.monitor, socket, self.power_controller, b'MON')
+            self.monitor_logger.start()
+        
+
+        if self.keyboard is not None:
+            status = self.keyboard.probe()
+            if status is False:
+                print('Probe of the %s keyboard failed!' % (
+                      self.keyboard.variant), file=sys.stderr)
+                return False
+        
+
+        if self.assistant is not None:
+            self.power_monitors.append(self.assistant)
+            print(self.power_monitors)
+            self.assistant.start()
+
+        if self.video is not None:
+            status = self.video.probe()
+            if status is False:
+                print('Probe of the %s video failed!' % (
+                      self.video.variant), file=sys.stderr)
+                return False
+            self.video.start()
+
+        #if self._www is not None:
+        #    self._www.start()
+
+        if self.is_server is True:
+            handler = self._session_check
+            self._session_timer = mtda_amqp.utils.RepeatTimer(10, handler)
+            self._session_timer.start()
+
+        # Start from a known state
+        self._target_off()
+        self.storage_to_target()
+
+        return True
+
+    def storage_locked(self, session=None):
+        self.mtda.debug(3, "main.storage_locked()")
+
+        self._session_check(session)
+        if self._check_locked(session):
+            result = True
+        # Cannot swap the shared storage device between the host and target
+        # without a driver
+        elif self.storage_controller is None:
+            self.mtda.debug(4, "storage_locked(): no shared storage device")
+            result = True
+        # If hotplugging is supported, swap only if the shared storage
+        # isn't opened
+        elif self.storage_controller.supports_hotplug() is True:
+            result = self._storage_opened
+        # We also need a power controller to be safe
+        elif self.power_controller is None:
+            self.mtda.debug(4, "storage_locked(): no power controller")
+            result = True
+        # The target shall be OFF
+        elif self.target_status() != "OFF":
+            self.mtda.debug(4, "storage_locked(): target isn't off")
+            result = True
+        # Lastly, the shared storage device shall not be opened
+        elif self._storage_opened is True:
+            self.mtda.debug(4, "storage_locked(): "
+                               "shared storage is in used (opened)")
+            result = True
+        # We may otherwise swap our shared storage device
+        else:
+            result = False
+
+        self.mtda.debug(3, "main.storage_locked(): %s" % str(result))
+        return result
+
+
+    def storage_to_target(self, session=None):
+        self.mtda.debug(3, "main.storage_to_target()")
+
+        self._session_check(session)
+        if self.storage_locked(session) is False:
+            self.storage_close()
+            result = self.storage_controller.to_target()
+            if result is True:
+                self._storage_event(self.storage_controller.SD_ON_TARGET)
+        else:
+            self.mtda.debug(1, "storage_to_target(): shared storage is locked")
+            result = False
+
+        self.mtda.debug(3, "main.storage_to_target(): %s" % str(result))
+        return result
+
     def storage_status(self, session=None):
         #self.mtda.debug(3, "main.storage_status()")
-        
         self._session_check(session)
         print("I am here in session part!")
         if self.storage_controller is None:
@@ -246,12 +852,68 @@ class MTDA_AMQP:
         print(type(result))
         return result
 
+    def _power_event(self, status):
+        self._power_expiry = None
+        print('The status is {status}')
+        if status == CONSTS.POWER.ON:
+            self._uptime = time.monotonic()
+        elif status == CONSTS.POWER.OFF:
+            self._uptime = 0
 
-    def target_on(self,args=None):
+        for m in self.power_monitors:
+            m.power_changed(status)
+        print(self.power_monitors)
+        self.notify("POWER %s" % status)
+
+
+    def target_on(self,session=None):
         result=True
         print("The target is powered on")
         os.system("echo 1 > /sys/class/gpio/gpio201/value")
         os.system("echo 1 > /sys/class/gpio/gpio203/value")
+        return result
+
+    def exec_power_off_script(self):
+        #self.mtda.debug(3, "main.exec_power_off_script()")
+
+        if self.power_off_script:
+            exec(self.power_off_script, {"env": self.env, "mtda-amqp": self})
+
+
+    def _target_off(self, session=None):
+        #self.mtda.debug(3, "main._target_off()")
+
+        # call power-off script before anything else
+        #
+        # power sequence:
+        #   <power-on>
+        #     <power-on-script>/
+        #       <runtime>
+        #     <power-off-script>
+        #   <power-off>
+        #
+        self.exec_power_off_script()
+
+        # pause console
+        if self.console_logger is not None:
+            self.console_logger.reset_timer()
+            self.console_logger.pause()
+
+        # and monitor
+        if self.monitor_logger is not None:
+            self.monitor_logger.reset_timer()
+            self.monitor_logger.pause()
+
+        # release keyboard
+        if self.keyboard is not None:
+            self.keyboard.idle()
+
+        result = True
+        if self.power_controller is not None:
+            result = self.power_controller.off()
+        self._power_event(CONSTS.POWER.OFF)
+
+        #self.mtda.debug(3, "main._target_off(): {}".format(result))
         return result
     
     def target_off(self,args=None):
@@ -273,13 +935,14 @@ class MTDA_AMQP:
 
     def _target_status(self, session=None):
         #self.mtda.debug(3, "main._target_status()")
-
+        print(f"the controller status is {self.power_controller}")
         if self.power_controller is None:
             result = CONSTS.POWER.UNSURE
         else:
             result = self.power_controller.status()
 
         #self.mtda.debug(3, "main._target_status(): {}".format(result))
+        print(f"result of _target_status {result}")
         return result
 
     def target_status(self, session=None):
@@ -291,13 +954,36 @@ class MTDA_AMQP:
         #self.mtda.debug(3, "main.target_status(): {}".format(result))
         return
 
+
+    def usb_ports(self, session=None):
+        #self.mtda.debug(3, "main.usb_ports()")
+        self._session_check(session)
+        return len(self.usb_switches)
+   
+    def video_url(self, host="", opts=None):
+       # self.mtda.debug(3, "main.video_url(host={0}, "
+                         #  "opts={1})".format(host, opts))
+
+        result = None
+        if self.video is not None:
+            result = self.video.url(host, opts)
+
+       # self.mtda.debug(3, "main.video_url(): %s" % str(result))
+        return result
+
     def on_request(self,ch, method, props, body):
+        connection_props=props
         body = str(body.decode('UTF-8'))
-        cmd_dict = {'target_locked':self.target_locked,
+        print(f"There in the body part {body}")
+        cmd_dict = {'console_send':self.console_send,
+                    'target_locked':self.target_locked,
                     'target_on': self.target_on,
                     'target_off' : self.target_off,
                     'target_status':self.target_status,
-                    'storage_status':self.storage_status}
+                    'storage_status':self.storage_status,
+                    'agent_version':self.agent_version,
+                    'usb_ports':self.usb_ports,
+                    'video_url':self.video_url}
         if ":" in body:
             print(f"Definition name: {body}")
             function_call_dict = eval(body)
@@ -310,6 +996,13 @@ class MTDA_AMQP:
         ch.basic_publish(exchange='',routing_key=props.reply_to,properties=pika.BasicProperties(correlation_id =props.correlation_id),body=str(response))
         #ch.basic_publish(exchange='',routing_key='mtda-amqp',properties=pika.BasicProperties(correlation_id =props.correlation_id),body=str(response))
         ch.basic_ack(delivery_tag=method.delivery_tag)
+
+    def publish_data(self,data):
+        self.mtda.debug(3,"in the publish data *****************")
+        self.mtda.debug(3,"%s"%(connection_props))
+        self.channel.basic_publish(exchange='',routing_key=connection_props.reply_to,properties=pika.BasicProperties(correlation_id =connection_props.correlation_id),body=str(data))
+
+
 
     def run_server(self):
         self.channel.start_consuming()
