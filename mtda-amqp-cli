@@ -24,81 +24,8 @@ class MTDA_Application:
         self.pidfile = "/var/run/mtda.pid"
         self.exiting = False
         self.channel = "console"
-
-    def debug(self, level, msg):
-        self.client().debug(level, msg)
-
-    def target_info(self, args=None):
-        sys.stdout.write("\rFetching target information...\r")
-        sys.stdout.flush()
-
-        # Get general information
-        client = self.client()
-        locked = " (locked)" if client.target_locked() else ""
-        remote = "Local" if self.remote is None else self.remote
-        session = client.session()
-        storage_status, writing, written = client.storage_status()
-        writing = "WRITING" if writing is True else "IDLE"
-        written = self._human_readable_size(written)
-        tgt_status = client.target_status()
-        uptime = ""
-        if tgt_status == "ON":
-            uptime = " (up %s)" % self.target_uptime()
-        try:
-            remote_version = client.agent_version()
-        except (zerorpc.RemoteError) as e:
-            if e.name == 'NameError':
-                remote_version = "<=0.5"
-            else:
-                raise e
-
-        host = MultiTenantDeviceAccess()
-        prefix_key = chr(ord(client.console_prefix_key()) + ord('a') - 1)
-
-        # Print general information
-        print("Host           : %s (%s)%30s\r" % (
-              socket.gethostname(), host.version, ""))
-        print("Remote         : %s (%s)%30s\r" % (
-              remote, remote_version, ""))
-        print("Prefix key:    : ctrl-%s\r" % (prefix_key))
-        print("Session        : %s\r" % (session))
-        print("Target         : %-6s%s%s\r" % (tgt_status, locked, uptime))
-        print("Storage on     : %-6s%s\r" % (storage_status, locked))
-        print("Storage writes : %s (%s)\r" % (written, writing))
-
-        # Print status of the USB ports
-        ports = client.usb_ports()
-        for ndx in range(0, ports):
-            status = client.usb_status(ndx+1)
-            print("USB #%-2d        : %s\r" % (ndx+1, status))
-
-        # Print video stream details
-        url = client.video_url()
-        if url is not None:
-            print("Video stream   : %s\r" % (url))
-
-    def target_off(self, args=None):
-        status = self.agent.call("target_off")
-
-    def target_on(self, args=None):
-        status = self.agent.call("target_on")
-
-    def target_cmd(self, args):
-        if len(args) > 0:
-            cmd = args[0]
-            args.pop(0)
-
-            cmds = {
-               'off': self.target_off,
-               'on': self.target_on,
-            }
-
-            if cmd in cmds:
-                return cmds[cmd](args)
-            else:
-                print("unknown target command '%s'!" % (cmd), file=sys.stderr)
-                return 1
-    
+        self.screen = ScreenOutput(self)
+   
     #Client part
     def client(self):
         return self.agent
@@ -144,11 +71,11 @@ class MTDA_Application:
 
         # Print target information
         if sys.stdin.isatty():
-            self.target_info()
-
+            pass
+            #self.target_info()
         # Connect to the consoles
-        client.console_remote(self.remote, self.screen)
-        client.monitor_remote(self.remote, self.screen)
+        #client.console_remote(self.remote, self.screen)
+        #client.monitor_remote(self.remote, self.screen)
 
         client.console_init()
 
@@ -164,9 +91,15 @@ class MTDA_Application:
                 c = client.console_getkey()
                 self.console_menukey(c)
             elif self.channel == 'console':
-                server.console_send(c, True)
+                if c == chr(0x0d):
+                    server.console_send('\r\n', True)
+                else:
+                    server.console_send(c, True)
+                #print(f"The key pressed is {c}")
             else:
                 server.monitor_send(c, True)
+
+        print("\r\nThank you for using MTDA!\r\n\r\n")
 
 
     def console_menukey(self, c):
@@ -224,7 +157,95 @@ class MTDA_Application:
         elif c == 'u':
             server.usb_toggle(1)
 
+    def _human_readable_size(self, size):
+        if size < 1024*1024:
+            return "{:d} KiB".format(int(size/1024))
+        elif size < 1024*1024*1024:
+            return "{:d} MiB".format(int(size/1024/1024))
+        else:
+            return "{:.2f} GiB".format(size/1024/1024/1024)
 
+
+    def target_info(self, args=None):
+        sys.stdout.write("\rFetching target information...\r")
+        sys.stdout.flush()
+
+        # Get general information
+        client = self.client()
+        #locked = " (locked)" if client.target_locked() else ""
+        locked = "Locked"
+        remote = "Local" if self.remote is None else self.remote
+        session = client.session()
+        #print(f"storage status in cli {client.storage_status()},{type(client.storage_status)}") 
+        #storage_status, writing, written = eval(client.storage_status())
+        storage_status = "TARGEt"
+        #writing = "WRITING" if writing is True else "IDLE"
+        writing = "WRITING" 
+        #written = self._human_readable_size(written)
+        written = "Writtern"
+        #tgt_status = client.target_status()
+        tgt_status = "ON"
+        uptime = ""
+        #if tgt_status == "ON":
+        #    uptime = " (up %s)" % self.target_uptime()
+        remote_version = client.agent_version()
+        host = MTDA_AMQP()
+        prefix_key = chr(ord(client.console_prefix_key()) + ord('a') - 1)
+
+        # Print general information
+        print("Host           : %s (%s)%30s\r" % (
+              socket.gethostname(), host.version.__version__, ""))
+        print("Remote         : %s (%s)%30s\r" % (
+              remote,eval(remote_version) , ""))
+        print("Prefix key:    : ctrl-%s\r" % (prefix_key))
+        print("Session        : %s\r" % (session))
+        print("Target         : %-6s%s%s\r" % (tgt_status, locked, uptime))
+        print("Storage on     : %-6s%s\r" % (storage_status, locked))
+        print("Storage writes : %s (%s)\r" % (written, writing))
+
+        # Print status of the USB ports
+        #ports = eval(client.usb_ports())
+        # print(ports)
+        '''
+        for ndx in range(0, ports):
+            status = client.usb_status(ndx+1)
+            print("USB #%-2d        : %s\r" % (ndx+1, status))
+
+        # Print video stream details
+        url = eval(client.video_url())
+        if url is not None:
+            print("Video stream   : %s\r" % (url))
+        ''' 
+
+    def target_off(self,args=None):
+        print("Target off")
+        status = self.client().target_off()
+        return 0 if (status is True) else 1
+
+    def target_on(self,args=None):
+        print("Target on")
+        status = self.client().target_on()
+        return 0 if (status is True) else 1
+
+    def target_cmd(self, args):
+       if len(args) > 0:
+            cmd = args[0]
+            args.pop(0)
+
+            cmds = {
+               'off': self.target_off,
+               'on': self.target_on,
+            }
+
+            if cmd in cmds:
+                return cmds[cmd](args)
+            else:
+                print("unknown target command '%s'!" % (cmd), file=sys.stderr)
+                return 1
+
+    def print_version(self):
+        agent = MTDA_AMQP()
+        print("MTDA version: %s" % agent.version)
 
     def main(self):
         config = None

@@ -16,8 +16,11 @@ class Client:
         self._agent = agent
         self.remote=remote
         self.connection = pika.BlockingConnection(pika.URLParameters('amqp://admin:password@%s:5672'%(str(self.remote))))
+        #self.parameters = pika.ConnectionParameters('134.86.62.153',5672,self.credentials)
+        self.connection_params = pika.ConnectionParameters(heartbeat=10)
         self.channel = self.connection.channel()
         result = self.channel.queue_declare(queue='', exclusive=True)
+        self.channel.queue_purge(queue='')
         self.callback_queue = result.method.queue
         self.channel.basic_consume(
             queue=self.callback_queue,
@@ -44,6 +47,12 @@ class Client:
         else:
             self._session = session
 
+    def agent_version(self):
+        return self._impl('agent_version')
+
+    def console_init(self):
+        return self._agent.console_init()
+
     def console_dump(self):
         return self._impl.console_dump(self._session)
 
@@ -57,7 +66,7 @@ class Client:
         return self._agent.console_getkey()
 
     def console_send(self, data, raw=False):
-        return self._impl.console_send(data, raw, self._session)
+        return self._impl('{"console_send":["%s","%s","%s"]}'%(data,raw,self._session))
 
     def console_prefix_key(self):
         return self._agent.console_prefix_key()
@@ -71,6 +80,12 @@ class Client:
     def pastebin_api_key(self):
         return self._agent.pastebin_api_key()
 
+    def remote(self):
+        return self._agent.remote
+
+    def session(self):
+        return self._session
+     
     def start(self):
         return self._agent.start()
 
@@ -101,26 +116,38 @@ class Client:
 
     def storage_status(self):
         self._impl('{"storage_status":["%s"]}'%(self._session))
-        print("I am waiting in storage status")
-        response = self.response
-        print(response)
-        return response	
+        return self._impl('{"storage_status":["%s"]}'%(self._session))
+    
+    def target_on(self):
+        print("In client part")
+        self._impl('{"target_on":["%s"]}'%(self._session))
+
+    def target_off(self):
+        self._impl('{"target_off":["%s"]}'%(self._session))
 
     def target_locked(self):
         return self._impl('{"target_locked":["%s"]}'%(self._session))
 
+    def target_status(self):
+        return self._impl('{"target_status":["%s"]}'%(self._session))
 
-    def remote(self):
-        return self._agent.remote
+    def usb_ports(self):
+        return self._impl('{"usb_ports":["%s"]}'%(self._session))
 
-    def session(self):
-        return self._session
-        
+    def video_url(self, host="", opts=None):
+        if host == "":
+            host = os.getenv("MTDA_REMOTE", "")
+        return self._impl('{"video_url":["%s","%s"]}'%(host, opts))
+       
     def on_response(self, ch, method, props, body):
-        print("HI I am waiting")
-        print(body)
+        #print(body,type(body))
         if self.corr_id == props.correlation_id:
-            self.response = body
+            self.response = body.decode('UTF-8')
+            if body!="" or body!=None or len(body) > 0 or body != " ":
+                print(str(body,"UTF-8").rstrip(),end='')
+            else:
+                pass
+           
 
 
     def call(self, n):

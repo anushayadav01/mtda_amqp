@@ -73,16 +73,30 @@ class MTDA_AMQP:
         self._socket_lock = threading.Lock()
 
 
-        # Config file in $HOME/.mtda/config
-        home = os.getenv('HOME', '')
-        if home != '':
-            self.config_files.append(os.path.join(home, '.mtda', 'config'))
 
-        # Config file in /etc/mtda/config
-        if os.path.exists('/etc'):
-            self.config_files.append(os.path.join('/etc', 'mtda', 'config'))
+    def console_prefix_key(self):
+        #self.mtda.debug(3, "main.console_prefix_key()")
+        return self.prefix_key
 
+    def _prefix_key_code(self, prefix_key):
+        prefix_key = prefix_key.lower()
+        key_dict = {'ctrl-a': '\x01', 'ctrl-b': '\x02', 'ctrl-c': '\x03',
+                    'ctrl-d': '\x04', 'ctrl-e': '\x05', 'ctrl-f': '\x06',
+                    'ctrl-g': '\x07', 'ctrl-h': '\x08', 'ctrl-i': '\x09',
+                    'ctrl-j': '\x0A', 'ctrl-k': '\x0B', 'ctrl-l': '\x0C',
+                    'ctrl-n': '\x0E', 'ctrl-o': '\x0F', 'ctrl-p': '\x10',
+                    'ctrl-q': '\x11', 'ctrl-r': '\x12', 'ctrl-s': '\x13',
+                    'ctrl-t': '\x14', 'ctrl-u': '\x15', 'ctrl-v': '\x16',
+                    'ctrl-w': '\x17', 'ctrl-x': '\x18', 'ctrl-y': '\x19',
+                    'ctrl-z': '\x1A'}
 
+        if prefix_key in key_dict:
+            key_ascii = key_dict[prefix_key]
+            return key_ascii
+        else:
+            raise ValueError("the prefix key specified '{0}' is not "
+                             "supported".format(prefix_key))
+    
     def agent_version(self):
         return self.version.__version__
 
@@ -702,10 +716,8 @@ class MTDA_AMQP:
         self.mtda.debug(3, "main._session_event(%s)" % str(info))
 
         result = None
-        if info is not None:
-            self.notify("SESSION %s" % info)
-
-        self.mtda.debug(3, "main._session_event: %s" % str(result))
+        #if info is not None:
+        #    self.notify(CONSTS.EVENTS.SESSION, info)
         return result
 
     def start(self):
