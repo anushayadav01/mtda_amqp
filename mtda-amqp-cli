@@ -254,7 +254,10 @@ class MTDA_Application:
                 self.agent = MTDA_AMQP()
                 self.agent.load_config(None, daemonize, config)
                 self.agent.start()
-                self.agent.run_server()
+                try:
+                    self.agent.run_server()
+                except KeyboardInterrupt:
+                    sys.exit()
 
         if len(stuff) == 0:
             stuff = ['target', 'on']    

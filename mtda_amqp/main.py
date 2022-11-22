@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 import pika,importlib
-import os,sys,time,threading
+import os,sys,time,threading,re
 import json
 import configparser
 import traceback
@@ -11,7 +11,7 @@ from mtda_amqp import __version__
 from mtda_amqp.storage.writer import AsyncImageWriter
 import mtda_amqp.keyboard.controller
 import mtda_amqp.power.controller
-import mtda_amqp.utils
+from mtda_amqp import utils
 from mtda_amqp.console.logger import ConsoleLogger
 
 DEFAULT_PREFIX_KEY = 'ctrl-a'
@@ -29,10 +29,11 @@ class MTDA_AMQP:
     def __init__(self):
         global connection_props
         self.connection = pika.BlockingConnection(pika.URLParameters('amqp://admin:password@134.86.62.153:5672'))
-        self.channel = self.connection.channel()
-        self.config_files = ['mtda.ini'] 
+        self.config_files = ['mtda.ini']
+        self.channel = self.connection.channel() 
         self.channel.queue_declare(queue='mtda-amqp')
-        self.channel.queue_declare(queue='mtda-console-amqp')
+        self.channel.queue_declare(queue='mtda-console')
+        self.channel.queue_purge(queue='mtda-console')
         self.channel.queue_purge(queue='mtda-amqp')
         self.channel.basic_qos(prefetch_count=1)
         self.channel.basic_consume(queue='mtda-amqp', on_message_callback=self.on_request)
@@ -54,6 +55,8 @@ class MTDA_AMQP:
         self.storage_controller = None
         self._power_lock = threading.Lock()
         self.power_controller = None
+        self.power_on_script = None
+        self.power_off_script = None
         self.version=__version__
         self.usb_switches = []
         self._power_expiry = None
@@ -98,12 +101,11 @@ class MTDA_AMQP:
 
 
     def _check_locked(self, session):
-        #self.mtda.debug(3, "main._check_locked()")
+        self.mtda.debug(3, "main._check_locked()")
         owner = self.target_owner()
         if owner is None:
             return False
         status = False if session == owner else True
-        print(f"status is {status}")
         return status
 
     def console_init(self):
@@ -112,19 +114,21 @@ class MTDA_AMQP:
 
     def console_send(self, data, raw=False, session=None):
         self.mtda.debug(3, "main.console_send()")
-        self._session_check(session)
+        #self._session_check(session)
         result = None
-        if self.console_locked(session) is False and \
-           self.console_logger is not None:
-            print(f"The data in the console send {data} {raw} in main.py")
-            result = self.console_logger.write(data, raw)
+        #if self.console_locked(session) is False and \
+        #  self.console_logger is not None:
+        print(f"The data in the console send {data} {raw} in main.py")
+        result = self.console_logger.write_amqp(data, raw)
 
         self.mtda.debug(3, "main.console_send(): %s" % str(result))
+        result=str(result.decode('UTF-8')) 
+        return result
 
     def console_locked(self, session=None):
         self.mtda.debug(3, "main.console_locked()")
 
-        self._session_check(session)
+        #self._session_check(session)
         result = self._check_locked(session)
 
         self.mtda.debug(3, "main.console_locked(): %s" % str(result))
@@ -311,6 +315,10 @@ class MTDA_AMQP:
             # Configure the console
             config = dict(parser.items('console'))
             self.console.configure(config)
+            self.mtda.debug(3, "********************************************************************")
+            self.mtda.debug(3, "Port : %s\n\r"%(self.console.port))
+            self.mtda.debug(3, "Baudrate : %s\n\r"%(self.console.rate))
+            self.mtda.debug(3, "********************************************************************")
             timestamps = parser.getboolean('console', 'timestamps',
                                            fallback=None)
             self._time_from_pwr = timestamps
@@ -611,17 +619,21 @@ class MTDA_AMQP:
     
 
     def power_locked(self, session=None):
-        # self.mtda.debug(3, "main.power_locked()")
+        self.mtda.debug(3, "main.power_locked()")
 
         self._session_check(session)
         if self.power_controller is None:
             result = True
         else:
             result = self._check_locked(session)
-        print("The power locked {result}")
+
+        self.mtda.debug(3,"main.power_locked() : %s" % str(result))
+        return result
 
     def _session_check(self, session=None):
-        #self.mtda.debug(3, "main._session_check(%s)" % str(session))
+        return True
+        '''
+        self.mtda.debug(3, "main._session_check(%s)" % str(session))
 
         events = []
         now = time.monotonic()
@@ -673,7 +685,8 @@ class MTDA_AMQP:
 
         # Send event sessions generated above
         for e in events:
-            self._session_event(e)
+            pass
+            #self._session_event(e)
 
         # Check if we should auto power-off the device
         if power_off is True:
@@ -683,6 +696,7 @@ class MTDA_AMQP:
 
         self.mtda.debug(3, "main._session_check: %s" % str(result))
         return result
+        '''
     
     def _session_event(self, info):
         self.mtda.debug(3, "main._session_event(%s)" % str(info))
@@ -848,7 +862,7 @@ class MTDA_AMQP:
         return result
 
     def storage_status(self, session=None):
-        #self.mtda.debug(3, "main.storage_status()")
+        self.mtda.debug(3, "main.storage_status()")
         self._session_check(session)
         print("I am here in session part!")
         if self.storage_controller is None:
@@ -873,64 +887,98 @@ class MTDA_AMQP:
 
         for m in self.power_monitors:
             m.power_changed(status)
-        self.notify("POWER %s" % status)
+        #self.notify("POWER %s" % status)
 
 
     def target_on(self,session=None):
-        result=True
+        self.mtda.debug(3, "main.target_on()")
+
+        result = True
+        self._session_check(session)
+        #with self._power_lock:
+        status = self._target_status()
+        if status != CONSTS.POWER.ON:
+            result = False
+            if self.power_locked(session) is False:
+                result = self._target_on(session)
+        '''        
         print("The target is powered on")
         os.system("echo 1 > /sys/class/gpio/gpio201/value")
         os.system("echo 1 > /sys/class/gpio/gpio203/value")
+        '''
+        self.mtda.debug(3, "main.target_on(): %s" % str(result))
         return result
 
+    def _target_on(self, session=None):
+        self.mtda.debug(3, "main._target_on()")
+
+        result = False
+        if self.power_locked(session) is False:
+            result = self.power_controller.on()
+            if result is True:
+                '''
+                if self.console_logger is not None:
+                    #self.console_logger.resume()
+                    self.console_logger.resume_amqp()
+                '''
+                self.exec_power_on_script()
+                self._power_event(CONSTS.POWER.ON)
+
+    def exec_power_on_script(self):
+        self.mtda.debug(3, "main.exec_power_on_script()")
+
+        result = None
+        if self.power_on_script:
+            self.mtda.debug(4, "exec_power_on_script(): "
+                               "%s" % self.power_on_script)
+            result = exec(self.power_on_script,
+                          {"env": self.env, "mtda": self})
+
+        self.mtda.debug(3, "main.exec_power_on_script(): %s" % str(result))
+
     def exec_power_off_script(self):
-        #self.mtda.debug(3, "main.exec_power_off_script()")
+        self.mtda.debug(3, "main.exec_power_off_script()")
 
         if self.power_off_script:
             exec(self.power_off_script, {"env": self.env, "mtda-amqp": self})
 
 
     def _target_off(self, session=None):
-        #self.mtda.debug(3, "main._target_off()")
-
-        # call power-off script before anything else
-        #
-        # power sequence:
-        #   <power-on>
-        #     <power-on-script>/
-        #       <runtime>
-        #     <power-off-script>
-        #   <power-off>
-        #
-        self.exec_power_off_script()
-
-        # pause console
-        if self.console_logger is not None:
-            self.console_logger.reset_timer()
-            self.console_logger.pause()
-
-        # and monitor
-        if self.monitor_logger is not None:
-            self.monitor_logger.reset_timer()
-            self.monitor_logger.pause()
-
-        # release keyboard
-        if self.keyboard is not None:
-            self.keyboard.idle()
+        self.mtda.debug(3, "main._target_off()")
 
         result = True
         if self.power_controller is not None:
             result = self.power_controller.off()
-        self._power_event(CONSTS.POWER.OFF)
+        if self.keyboard is not None:
+            self.keyboard.idle()
+        if self.console_logger is not None:
+            self.console_logger.reset_timer()
+            if result is True:
+                self.console_logger.pause_amqp()
+                self.exec_power_off_script()
+                self._power_event(CONSTS.POWER.OFF)
 
-        self.mtda.debug(3, "main._target_off(): {}".format(result))
-        return result
-    
-    def target_off(self,args=None):
+
+    def target_off(self,session=None):
+        '''
         result=False
         print("The target is powered off")
         os.system("echo 0 >/sys/class/gpio/gpio201/value")
         os.system("echo 0 >/sys/class/gpio/gpio203/value")
+        return result
+        '''
+        self.mtda.debug(3, "main.target_off()")
+
+        result = True
+        self._session_check(session)
+
+        status = self.target_status()
+        if status != CONSTS.POWER.OFF:
+            result = False
+            if self.power_locked(session) is False:
+                result = self._target_off(session)
+
+        self.mtda.debug(3, "main.target_off(): %s" % str(result))
         return result
 	
     def target_locked(self, session):
@@ -940,7 +988,7 @@ class MTDA_AMQP:
         return self._check_locked(session)
 
     def target_owner(self):
-        #self.mtda.debug(3, "main.target_owner()")
+        self.mtda.debug(3, "main.target_owner()")
         return self._lock_owner
 
     def _target_status(self, session=None):
@@ -982,6 +1030,7 @@ class MTDA_AMQP:
     def on_request(self,ch, method, props, body):
         self.props = props
         body = str(body.decode('UTF-8'))
+        print("There in on_request part")
         cmd_dict = {'console_send':self.console_send,
                     'target_locked':self.target_locked,
                     'target_on': self.target_on,
@@ -992,11 +1041,18 @@ class MTDA_AMQP:
                     'usb_ports':self.usb_ports,
                     'video_url':self.video_url}
         if ":" in body:
-            print(f"Definition name: {body}")
-            function_call_dict = eval(body)
-            function_name = list(function_call_dict.keys())[0]
-            arguments = function_call_dict[function_name]
-            response = cmd_dict[function_name](*arguments)
+            if "console_send" in body:
+                function_call_dict = re.findall('"([^"]*)"',body)
+                data = function_call_dict[1]
+                raw = function_call_dict[2]
+                session = function_call_dict[3]
+                response = self.console_send(str(data),raw,session)
+            else:
+                print(f"Definition name: {body}")
+                function_call_dict = eval(body)
+                function_name = list(function_call_dict.keys())[0]
+                arguments = function_call_dict[function_name]
+                response = cmd_dict[function_name](*arguments)
         else:
             response = cmd_dict[body]()
         print("There in on_request method",response) 
@@ -1006,9 +1062,22 @@ class MTDA_AMQP:
 
     def publish_data(self,data):
         self.mtda.debug(3,"in the publish data *****************")
-        self.channel.basic_publish(exchange='',routing_key="mtda-console-amqp",body=str(data))
-
+        #self.channel.stop_consuming()
+        self.channel.basic_publish(exchange='',routing_key="mtda-console",body=str(data))
+        #self.channel.start_consuming()
+        #self.channel.basic_publish(exchange='',routing_key="mtda-console-amqp",body=str(data),properties=pika.BasicProperties(delivery_mode = pika.spec.PERSISTENT_DELIVERY_MODE))
+        #self.channel.basic_publish(exchange='',routing_key=self.props.reply_to, properties=pika.BasicProperties(correlation_id=self.props.correlation_id),body=str(data))
 
 
     def run_server(self):
-        self.channel.start_consuming()
+        try:
+            self.channel.start_consuming()
+        except KeyboardInterrupt:
+            self.channel.stop_consuming()
+            self.connection.close()
+            if self.console_logger.is_open():
+                self.console_logger.close_connection()
+            else:
+                pass
+            print("Thank you ! have a good day")
+

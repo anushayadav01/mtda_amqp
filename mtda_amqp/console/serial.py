@@ -117,6 +117,11 @@ class SerialConsole(ConsoleInterface):
         self.mtda.debug(3, "console.serial.read(): %s" % str(result))
         return result
 
+    def is_open(self):
+        return self.ser.isOpen()
+
+    
+
     """ Write to the console"""
     def write(self, data):
         self.mtda.debug(3, "console.serial.write(data=%s)" % str(data))

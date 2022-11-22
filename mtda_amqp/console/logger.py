@@ -64,6 +64,9 @@ class ConsoleLogger:
         with self.rx_lock:
             self._clear()
 
+    def close_connection(self):
+        return self.console.close()
+
     def _dump(self, flush=True):
         data = ""
         lines = len(self.rx_buffer)
@@ -98,6 +101,10 @@ class ConsoleLogger:
         with self.rx_lock:
             line = self._head()
         return line
+    
+    def is_open(self):
+        return self.console.is_open()
+
 
     def lines(self):
         with self.rx_lock:
@@ -186,6 +193,26 @@ class ConsoleLogger:
 
         self.mtda.debug(3, "console.logger.wait: %s" % str(result))
         return result
+
+
+    def write_amqp(self, data, raw=False):
+        con = self.console
+        if raw is False:
+            data = codecs.escape_decode(bytes(data, "utf-8"))[0]
+        else:
+            data = bytes(data, "utf-8")
+        if con.is_open():
+            self.mtda.debug(3,"console.logger.write_amqp()")
+            self.console.write(data)
+            data = con.read(con.pending() or 1)
+        else:
+            con.open()
+            self.mtda.debug(3,"console.logger.write_amqp()")
+            self.console.write(data)
+            data = con.read(con.pending() or 1)
+        return data
+
+      
 
     def write(self, data, raw=False):
         try:
@@ -351,6 +378,15 @@ class ConsoleLogger:
                            "{}".format(result))
         return result
 
+    def pause_amqp(self):
+        self.mtda.debug(3, "console.logger.pause_amqp()")
+        result = self.console.close()
+
+        self.mtda.debug(3, "console.logger.pause_amqp(): "
+                           "{}".format(result))
+        return result
+
+
     def resume(self):
         self.mtda.debug(3, "console.logger.resume()")
 
@@ -360,6 +396,13 @@ class ConsoleLogger:
                 self.rx_active.set()
 
         self.mtda.debug(3, "console.logger.resume(): "
+                           "{}".format(result))
+        return result
+
+    def resume_amqp(self):
+        self.mtda.debug(3,"console.logger.resme_logger()")
+        result = self.console.open()
+        self.mtda.debug(3, "console.logger.resume_logger(): "
                            "{}".format(result))
         return result
 
