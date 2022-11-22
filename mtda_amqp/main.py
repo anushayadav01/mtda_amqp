@@ -73,6 +73,15 @@ class MTDA_AMQP:
         self._socket_lock = threading.Lock()
 
 
+        home = os.getenv('HOME', '')
+        if home != '':
+            self.config_files.append(os.path.join(home, '.mtda', 'config'))
+
+        # Config file in /etc/mtda/config
+        if os.path.exists('/etc'):
+            self.config_files.append(os.path.join('/etc', 'mtda', 'config'))
+
+
 
     def console_prefix_key(self):
         #self.mtda.debug(3, "main.console_prefix_key()")
