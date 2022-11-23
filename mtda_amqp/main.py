@@ -29,7 +29,6 @@ def _make_printable(s):
 class MTDA_AMQP:
 
     def __init__(self):
-        global connection_props
         self.connection = pika.BlockingConnection(pika.URLParameters('amqp://admin:password@134.86.62.153:5672'))
         self.config_files = ['mtda.ini']
         self.channel = self.connection.channel() 
@@ -1026,7 +1025,7 @@ class MTDA_AMQP:
         return len(self.usb_switches)
    
     def video_url(self, host="", opts=None):
-       self.mtda.debug(3, "main.video_url(host={0}, "
+        self.mtda.debug(3, "main.video_url(host={0}, "
                            "opts={1})".format(host, opts))
 
         result = None
