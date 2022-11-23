@@ -924,11 +924,6 @@ class MTDA_AMQP:
             result = False
             if self.power_locked(session) is False:
                 result = self._target_on(session)
-        '''        
-        print("The target is powered on")
-        os.system("echo 1 > /sys/class/gpio/gpio201/value")
-        os.system("echo 1 > /sys/class/gpio/gpio203/value")
-        '''
         self.mtda.debug(3, "main.target_on(): %s" % str(result))
         return result
 
@@ -983,13 +978,6 @@ class MTDA_AMQP:
 
 
     def target_off(self,session=None):
-        '''
-        result=False
-        print("The target is powered off")
-        os.system("echo 0 >/sys/class/gpio/gpio201/value")
-        os.system("echo 0 >/sys/class/gpio/gpio203/value")
-        return result
-        '''
         self.mtda.debug(3, "main.target_off()")
 
         result = True
@@ -1028,7 +1016,7 @@ class MTDA_AMQP:
         with self._power_lock:
             result = self._target_status(session)
 
-        #self.mtda.debug(3, "main.target_status(): {}".format(result))
+        self.mtda.debug(3, "main.target_status(): {}".format(result))
         return
 
 
@@ -1038,14 +1026,14 @@ class MTDA_AMQP:
         return len(self.usb_switches)
    
     def video_url(self, host="", opts=None):
-       # self.mtda.debug(3, "main.video_url(host={0}, "
-                         #  "opts={1})".format(host, opts))
+       self.mtda.debug(3, "main.video_url(host={0}, "
+                           "opts={1})".format(host, opts))
 
         result = None
         if self.video is not None:
             result = self.video.url(host, opts)
 
-       # self.mtda.debug(3, "main.video_url(): %s" % str(result))
+        self.mtda.debug(3, "main.video_url(): %s" % str(result))
         return result
 
     def on_request(self,ch, method, props, body):
@@ -1076,9 +1064,7 @@ class MTDA_AMQP:
                 response = cmd_dict[function_name](*arguments)
         else:
             response = cmd_dict[body]()
-        print("There in on_request method",response) 
         ch.basic_publish(exchange='',routing_key=props.reply_to,properties=pika.BasicProperties(correlation_id =props.correlation_id),body=str(response))
-        #ch.basic_publish(exchange='',routing_key='mtda-amqp',properties=pika.BasicProperties(correlation_id =props.correlation_id),body=str(response))
         ch.basic_ack(delivery_tag=method.delivery_tag)
 
     def publish_data(self,data):
