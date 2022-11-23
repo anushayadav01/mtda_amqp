@@ -141,10 +141,10 @@ class Client:
     def on_response(self, ch, method, props, body):
         if self.corr_id == props.correlation_id:
             self.response = body.decode('UTF-8')
-            if body!="" or body!=None or len(body) > 0 or body != " ":
-                print(str(body,"UTF-8").rstrip(),end='')
-            else:
-                pass
+            #if body!="" or body!=None or len(body) > 0 or body != " ":
+            #    print(str(body,"UTF-8").rstrip(),end='')
+            #else:
+            #   pass
 
     def call(self, n):
         self.response = None

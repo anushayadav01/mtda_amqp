@@ -1083,11 +1083,7 @@ class MTDA_AMQP:
 
     def publish_data(self,data):
         self.mtda.debug(3,"in the publish data *****************")
-        #self.channel.stop_consuming()
         self.channel.basic_publish(exchange='',routing_key="mtda-console",body=str(data))
-        #self.channel.start_consuming()
-        #self.channel.basic_publish(exchange='',routing_key="mtda-console-amqp",body=str(data),properties=pika.BasicProperties(delivery_mode = pika.spec.PERSISTENT_DELIVERY_MODE))
-        #self.channel.basic_publish(exchange='',routing_key=self.props.reply_to, properties=pika.BasicProperties(correlation_id=self.props.correlation_id),body=str(data))
 
 
     def run_server(self):
