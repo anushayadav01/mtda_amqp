@@ -10,7 +10,6 @@ import signal
 import time
 import sys
 
-#from mtda_amqp.constants import DEFAULTS
 from mtda_amqp.console.screen import ScreenOutput
 from mtda_amqp.main import MTDA_AMQP
 from mtda_amqp.client import Client
@@ -95,7 +94,6 @@ class MTDA_Application:
                     server.console_send('\r\n', True)
                 else:
                     server.console_send(c, True)
-                #print(f"The key pressed is {c}")
             else:
                 server.monitor_send(c, True)
 
@@ -298,7 +296,6 @@ class MTDA_Application:
             sys.exit(1)
 
 if __name__ == '__main__':
-
     mtda_rpc=MTDA_Application()
     mtda_rpc.main()
 

@@ -4,6 +4,8 @@ import os,sys,time,threading,re
 import json
 import configparser
 import traceback
+
+
 from mtda_amqp.console.remote import RemoteConsole, RemoteMonitor
 import mtda_amqp.constants as CONSTS
 from mtda_amqp.console.input import ConsoleInput
@@ -110,7 +112,7 @@ class MTDA_AMQP:
         return self.version.__version__
 
     def config_set_power_timeout(self, timeout, session=None):
-        #self.mtda.debug(3, "main.config_set_power_timeout()")
+        self.mtda.debug(3, "main.config_set_power_timeout()")
 
         result = self._power_timeout
         self._power_timeout = timeout
@@ -118,8 +120,8 @@ class MTDA_AMQP:
             self._power_expiry = None
         self._session_check()
 
-       # self.mtda.debug(3, "main.config_set_power_timeout(): "
-         #                  "{}".format(result))
+        self.mtda.debug(3, "main.config_set_power_timeout(): "
+                           "{}".format(result))
         return result
 
 
@@ -186,7 +188,7 @@ class MTDA_AMQP:
         self.mtda.debug(3, "main.console_remote(): %s" % str(result))
 
     def console_prefix_key(self):
-        # self.mtda.debug(3, "main.console_prefix_key()")
+        self.mtda.debug(3, "main.console_prefix_key()")
         return self.prefix_key
 
     def debug(self, level, msg):
@@ -205,7 +207,7 @@ class MTDA_AMQP:
 
 
     def env_set(self, name, value, session=None):
-        #self.mtda.debug(3, "env_set()")
+        self.mtda.debug(3, "env_set()")
 
         self._session_check(session)
         result = None
@@ -219,7 +221,7 @@ class MTDA_AMQP:
         self.env[name] = value
         self.env["_%s" % name] = old_value
 
-        #self.mtda.debug(3, "env_set(): %s" % str(result))
+        self.mtda.debug(3, "env_set(): %s" % str(result))
         return result
 
     def load_environment(self, parser):
@@ -306,7 +308,7 @@ class MTDA_AMQP:
             '''
 
     def load_assistant_config(self, parser):
-        #self.mtda.debug(3, "main.load_assistant_config()")
+        self.mtda.debug(3, "main.load_assistant_config()")
 
         try:
             # Get variant
@@ -362,7 +364,7 @@ class MTDA_AMQP:
                 variant), file=sys.stderr)
 
     def load_keyboard_config(self, parser):
-        #self.mtda.debug(3, "main.load_keyboard_config()")
+        self.mtda.debug(3, "main.load_keyboard_config()")
 
         try:
             # Get variant
@@ -380,7 +382,7 @@ class MTDA_AMQP:
                 variant), file=sys.stderr)
 
     def load_monitor_config(self, parser):
-        #self.mtda.debug(3, "main.load_monitor_config()")
+        self.mtda.debug(3, "main.load_monitor_config()")
 
         try:
             # Get variant
@@ -399,7 +401,7 @@ class MTDA_AMQP:
                 variant), file=sys.stderr)
 
     def load_pastebin_config(self, parser):
-        #self.mtda.debug(3, "main.load_pastebin_config()")
+        self.mtda.debug(3, "main.load_pastebin_config()")
         self._pastebin_api_key = parser.get('pastebin', 'api-key',
                                             fallback='')
         self._pastebin_endpoint = parser.get('pastebin', 'endpoint',
@@ -448,7 +450,7 @@ class MTDA_AMQP:
                 variant), file=sys.stderr)
 
     def load_remote_config(self, parser):
-        #self.mtda.debug(3, "main.load_remote_config()")
+        self.mtda.debug(3, "main.load_remote_config()")
 
         self.conport = int(
             parser.get('remote', 'console', fallback=self.conport))
@@ -474,7 +476,7 @@ class MTDA_AMQP:
         self.is_remote = self.remote is not None
 
     def load_timeouts_config(self, parser):
-        # self.mtda.debug(3, "main.load_timeouts_config()")
+        self.mtda.debug(3, "main.load_timeouts_config()")
 
         result = None
         s = "timeouts"
@@ -490,16 +492,16 @@ class MTDA_AMQP:
         self._power_timeout = self._power_timeout * 60
         self._session_timeout = self._session_timeout * 60
 
-        #self.mtda.debug(3, "main.load_timeouts_config: %s" % str(result))
+        self.mtda.debug(3, "main.load_timeouts_config: %s" % str(result))
         return result
 
     def load_ui_config(self, parser):
-        #self.mtda.debug(3, "main.load_ui_config()")
+        self.mtda.debug(3, "main.load_ui_config()")
         self.prefix_key = self._prefix_key_code(parser.get(
             'ui', 'prefix', fallback=DEFAULT_PREFIX_KEY))
 
     def load_usb_config(self, parser):
-        #self.mtda.debug(3, "main.load_usb_config()")
+        self.mtda.debug(3, "main.load_usb_config()")
 
         try:
             # Get number of ports
@@ -513,7 +515,7 @@ class MTDA_AMQP:
             usb_ports = 0
 
     def load_usb_port_config(self, parser, section):
-        #self.mtda.debug(3, "main.load_usb_port_config()")
+        self.mtda.debug(3, "main.load_usb_port_config()")
 
         try:
             # Get attributes
@@ -559,13 +561,13 @@ class MTDA_AMQP:
                 variant), file=sys.stderr)
 
     def load_www_config(self, parser):
-        #self.mtda.debug(3, "main.load_www_config()")
+        self.mtda.debug(3, "main.load_www_config()")
 
         if www_support is True:
             self._www.configure(dict(parser.items('www')))
 
     def monitor_remote(self, host, screen):
-        #self.mtda.debug(3, "main.monitor_remote()")
+        self.mtda.debug(3, "main.monitor_remote()")
 
         result = None
         if self.is_remote is True:
@@ -612,13 +614,13 @@ class MTDA_AMQP:
         return result
 
     def _parse_script(self, script):
-        #self.mtda.debug(3, "main._parse_script()")
+        self.mtda.debug(3, "main._parse_script()")
 
         result = None
         if script is not None:
             result = script.replace("... ", "    ")
 
-        #self.mtda.debug(3, "main._parse_script(): %s" % str(result))
+        self.mtda.debug(3, "main._parse_script(): %s" % str(result))
         return result
     
     def _prefix_key_code(self, prefix_key):
