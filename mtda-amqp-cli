@@ -216,12 +216,10 @@ class MTDA_Application:
         ''' 
 
     def target_off(self,args=None):
-        print("Target off")
         status = self.client().target_off()
         return 0 if (status is True) else 1
 
     def target_on(self,args=None):
-        print("Target on")
         status = self.client().target_on()
         return 0 if (status is True) else 1
 

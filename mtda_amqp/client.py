@@ -119,7 +119,6 @@ class Client:
         return self._impl('{"storage_status":["%s"]}'%(self._session))
     
     def target_on(self):
-        print("In client part")
         self._impl('{"target_on":["%s"]}'%(self._session))
 
     def target_off(self):

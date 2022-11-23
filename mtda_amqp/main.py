@@ -1005,9 +1005,7 @@ class MTDA_AMQP:
         return result
 	
     def target_locked(self, session):
-        print("There in target locked function")
         self._session_check(session)
-        print("session")
         return self._check_locked(session)
 
     def target_owner(self):
@@ -1025,7 +1023,7 @@ class MTDA_AMQP:
         return result
 
     def target_status(self, session=None):
-        #self.mtda.debug(3, "main.target_status()")
+        self.mtda.debug(3, "main.target_status()")
 
         with self._power_lock:
             result = self._target_status(session)
@@ -1035,7 +1033,7 @@ class MTDA_AMQP:
 
 
     def usb_ports(self, session=None):
-        #self.mtda.debug(3, "main.usb_ports()")
+        self.mtda.debug(3, "main.usb_ports()")
         self._session_check(session)
         return len(self.usb_switches)
    
